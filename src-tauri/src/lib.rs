@@ -460,10 +460,11 @@ async fn extract_filmstrip_frames(
     // Add hardware acceleration args before -i
     ffmpeg_args.extend(hwaccel_args.iter().cloned());
     
-    // Create filter string - crop to fill (no black bars, CapCut style)
+    // Create filter string - crop to fill, target upper portion where faces are
+    // (in_h-out_h)/3 positions crop higher than center to capture faces in selfie videos
     let filter_str = format!(
-        "select='{}',scale={}:force_original_aspect_ratio=increase,crop={}:{},setpts=N/FRAME_RATE/TB",
-        select_expr, scale_str, width, height
+        "select='{}',scale={}:force_original_aspect_ratio=increase,crop={}:{}:(in_w-{})/2:(in_h-{})/3,setpts=N/FRAME_RATE/TB",
+        select_expr, scale_str, width, height, width, height
     );
     
     // Continue with input and filter args

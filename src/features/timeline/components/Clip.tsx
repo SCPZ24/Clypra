@@ -150,8 +150,9 @@ export const Clip = memo(function Clip({ clip, isSelected, pxPerSec, onSelect }:
       aria-selected={isSelected}
       aria-grabbed={isDragging ? "true" : "false"}
     >
+      {/* Video thumbnails - top portion (60px height like CapCut) */}
       {hasVideo && (
-        <div className="absolute inset-0 pointer-events-none" role="img" aria-label={filmstripLoading ? "Loading video preview" : stripUrl ? `Video preview for ${clip.name}` : "Video preview unavailable"}>
+        <div className="absolute top-0 left-0 right-0 h-[60px] pointer-events-none overflow-hidden" role="img" aria-label={filmstripLoading ? "Loading video preview" : stripUrl ? `Video preview for ${clip.name}` : "Video preview unavailable"}>
           {filmstripLoading && (
             <div className="flex items-center justify-center h-full">
               <div className="text-[10px] text-white/60">Loading filmstrip...</div>
@@ -164,10 +165,10 @@ export const Clip = memo(function Clip({ clip, isSelected, pxPerSec, onSelect }:
           )}
           {!filmstripLoading && stripUrl && (
             <div
-              className="absolute inset-0"
+              className="w-full h-full"
               style={{
                 backgroundImage: `url(${stripUrl})`,
-                backgroundSize: `${width}px ${60}px`,
+                backgroundSize: `auto 60px`,
                 backgroundRepeat: "repeat-x",
                 backgroundPosition: "left center",
               }}
@@ -177,8 +178,9 @@ export const Clip = memo(function Clip({ clip, isSelected, pxPerSec, onSelect }:
         </div>
       )}
 
+      {/* Waveform - bottom portion (below video, 32px height) */}
       {hasAudio && (
-        <div className="absolute inset-0 pointer-events-none" role="img" aria-label={waveformLoading ? "Loading audio waveform" : waveformError ? "Audio waveform unavailable" : `Audio waveform for ${clip.name}`}>
+        <div className="absolute bottom-0 left-0 right-0 h-[32px] pointer-events-none overflow-hidden" role="img" aria-label={waveformLoading ? "Loading audio waveform" : waveformError ? "Audio waveform unavailable" : `Audio waveform for ${clip.name}`}>
           {waveformLoading && (
             <div className="flex items-center justify-center h-full">
               <div className="text-[10px] text-white/60">Loading waveform...</div>
@@ -190,7 +192,7 @@ export const Clip = memo(function Clip({ clip, isSelected, pxPerSec, onSelect }:
             </div>
           )}
           {!waveformLoading && !waveformError && peaks && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+            <div className="flex items-end justify-center h-full pb-1 pointer-events-none">
               <Waveform peaks={peaks} width={width} height={28} />
             </div>
           )}

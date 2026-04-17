@@ -49,11 +49,16 @@ export function Waveform({ peaks, width, height, className }: WaveformProps) {
 
       ctx.fillStyle = "#10b981"; // emerald-500
 
+      // CapCut-style block bars with 40% gap between bars
+      const gapRatio = 0.4;
+      const barDrawWidth = barWidth * (1 - gapRatio);
+
       for (let i = 0; i < peaks.length; i++) {
         const barHeight = peaks[i] * centerY;
-        const x = i * barWidth;
+        const x = i * barWidth + (barWidth * gapRatio) / 2;
 
-        ctx.fillRect(x, centerY - barHeight, Math.max(1, barWidth - 1), barHeight * 2);
+        // Draw block-style bar with rounded top
+        ctx.fillRect(x, centerY - barHeight, Math.max(1, barDrawWidth), barHeight * 2);
       }
     });
 
