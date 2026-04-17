@@ -31,6 +31,11 @@ const CanvasRendererComponent: React.FC<CanvasRendererProps> = ({ baseWidth, bas
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const activeClipsRef = useRef<ActiveClip[]>([]);
 
+  // Hybrid playback: video element for smooth playback, FFmpeg for accurate paused frames
+  const videoElementsRef = useRef<Map<string, HTMLVideoElement>>(new Map());
+  const lastFrameTimeRef = useRef<number>(0);
+  const frameSkipCounterRef = useRef<number>(0);
+
   const clips = useTimelineStore((state) => state.clips);
   const tracks = useTimelineStore((state) => state.tracks);
   const playhead = useTimelineStore((state) => state.playhead);
@@ -79,6 +84,13 @@ const CanvasRendererComponent: React.FC<CanvasRendererProps> = ({ baseWidth, bas
         audio.src = "";
       });
       audioElementsRef.current.clear();
+
+      // Clean up video elements
+      videoElementsRef.current.forEach((video) => {
+        video.pause();
+        video.src = "";
+      });
+      videoElementsRef.current.clear();
     };
   }, [canvasDimensions]);
 
@@ -99,13 +111,17 @@ const CanvasRendererComponent: React.FC<CanvasRendererProps> = ({ baseWidth, bas
     } else {
       stopRAFLoop();
       stopAudioPlayback();
+      stopVideoPlayback();
+      // When pausing, render the exact frame via FFmpeg for accuracy
+      renderFrame(playhead);
     }
 
     return () => {
       stopRAFLoop();
       stopAudioPlayback();
+      stopVideoPlayback();
     };
-  }, [isPlaying]);
+  }, [isPlaying, playhead]);
 
   /**
    * Setup audio element for a clip
@@ -181,17 +197,120 @@ const CanvasRendererComponent: React.FC<CanvasRendererProps> = ({ baseWidth, bas
   };
 
   /**
-   * Start RAF loop for playback
+   * Setup video element for a clip (for smooth playback)
+   */
+  const setupVideoElement = (sourceMediaPath: string): HTMLVideoElement | null => {
+    let videoElement = videoElementsRef.current.get(sourceMediaPath);
+
+    if (!videoElement) {
+      try {
+        videoElement = document.createElement("video");
+        videoElement.src = sourceMediaPath;
+        videoElement.preload = "auto";
+        videoElement.muted = true; // We'll use separate audio
+        videoElement.style.display = "none";
+        document.body.appendChild(videoElement);
+        videoElementsRef.current.set(sourceMediaPath, videoElement);
+      } catch (error) {
+        console.error("Failed to create video element:", error);
+        return null;
+      }
+    }
+
+    return videoElement;
+  };
+
+  /**
+   * Start video playback (for smooth canvas rendering)
+   */
+  const startVideoPlayback = (clips: ActiveClip[]) => {
+    if (clips.length === 0) return;
+
+    const currentTimelineTime = useTimelineStore.getState().playhead;
+
+    for (const clip of clips) {
+      const videoElement = setupVideoElement(clip.sourceMediaPath);
+
+      if (videoElement) {
+        const timeIntoClip = currentTimelineTime - clip.startTime;
+        const videoStartTime = clip.sourceStart + timeIntoClip;
+
+        videoElement.currentTime = videoStartTime;
+        videoElement.playbackRate = 1.0;
+        videoElement.play().catch((error) => {
+          console.error("Failed to start video:", error);
+        });
+      }
+    }
+  };
+
+  /**
+   * Stop video playback
+   */
+  const stopVideoPlayback = () => {
+    for (const video of videoElementsRef.current.values()) {
+      if (!video.paused) {
+        video.pause();
+      }
+    }
+  };
+
+  /**
+   * Get current video time for sync
+   */
+  const getVideoTime = (): number | null => {
+    // Use first playing video element as master clock
+    for (const [path, video] of videoElementsRef.current.entries()) {
+      if (!video.paused && video.currentTime > 0) {
+        const clip = activeClipsRef.current.find((c) => c.sourceMediaPath === path);
+        if (clip) {
+          // Convert video time back to timeline time
+          return clip.startTime + (video.currentTime - clip.sourceStart);
+        }
+      }
+    }
+    return null;
+  };
+
+  /**
+   * Render video frames to canvas (smooth playback)
+   */
+  const renderVideoFrames = () => {
+    if (!contextRef.current) return;
+
+    const ctx = contextRef.current;
+    const { width, height } = canvasDimensions;
+
+    // Clear canvas
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, width, height);
+
+    // Draw each video element
+    const sortedClips = [...activeClipsRef.current].sort((a, b) => a.trackIndex - b.trackIndex);
+
+    for (const clip of sortedClips) {
+      const video = videoElementsRef.current.get(clip.sourceMediaPath);
+      if (video && video.readyState >= 2) {
+        ctx.drawImage(video, 0, 0, width, height);
+      }
+    }
+  };
+
+  /**
+   * Start RAF loop for playback - uses video elements for smooth playback
    */
   const startRAFLoop = () => {
     if (rafIdRef.current) {
       cancelAnimationFrame(rafIdRef.current);
     }
 
-    // Start audio for active clips
+    // Get active clips
     const activeClips = frameResolver.getActiveClips(playhead);
     if (activeClips.length > 0) {
+      // Start video and audio playback
+      startVideoPlayback(activeClips as ActiveClip[]);
       startAudioPlayback(activeClips as ActiveClip[]);
+      activeClipsRef.current = activeClips as ActiveClip[];
     }
 
     let lastTime = performance.now();
@@ -202,11 +321,14 @@ const CanvasRendererComponent: React.FC<CanvasRendererProps> = ({ baseWidth, bas
       const deltaTime = (now - lastTime) / 1000;
       lastTime = now;
 
-      // Get time from audio if available, otherwise advance manually
+      // Get time from video if available, otherwise from audio, otherwise manual
+      const videoTime = getVideoTime();
       const audioTime = getAudioTime();
       let currentTime: number;
 
-      if (audioTime !== null) {
+      if (videoTime !== null) {
+        currentTime = videoTime;
+      } else if (audioTime !== null) {
         currentTime = audioTime;
       } else {
         // Fallback: advance by delta
@@ -223,25 +345,8 @@ const CanvasRendererComponent: React.FC<CanvasRendererProps> = ({ baseWidth, bas
       // Update playhead
       useTimelineStore.getState().setPlayhead(currentTime);
 
-      // Render frame
-      renderFrame(currentTime);
-
-      // Preload upcoming frames every 5 frames (reduces stutter)
-      frameCount++;
-      if (frameCount % 5 === 0 && frameExtractorRef.current) {
-        const upcomingClips = frameResolver.getActiveClips(currentTime + 0.5);
-        if (upcomingClips.length > 0) {
-          // Preload next second of frames without awaiting
-          upcomingClips.forEach((clipData) => {
-            const clip: ActiveClip = {
-              ...clipData,
-              trackIndex: 0,
-              clipTime: 0,
-            };
-            frameExtractorRef.current?.getFrame(clip, currentTime + 0.5).catch(() => {});
-          });
-        }
-      }
+      // Render video frames to canvas (smooth, not FFmpeg)
+      renderVideoFrames();
 
       rafIdRef.current = requestAnimationFrame(loop);
     };

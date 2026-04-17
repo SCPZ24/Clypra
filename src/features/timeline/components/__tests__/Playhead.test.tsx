@@ -1,19 +1,28 @@
 /**
  * Playhead Component Tests
- * 
+ *
  * Tests the playhead positioning, dragging, and interaction
  * Covers: click to seek, drag scrubbing, boundary handling
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom";
 import { Playhead } from "../Playhead";
 import { CoordinateSystem } from "../../utils/coordinateSystem";
 import { useTimelineStore } from "../../store/timelineStore";
 
 // Mock the timeline store
+const mockSetPlayheadFn = vi.fn();
+
 vi.mock("../../store/timelineStore", () => ({
-  useTimelineStore: vi.fn(),
+  useTimelineStore: vi.fn((selector) => {
+    const state = {
+      playhead: 5.0,
+      setPlayhead: mockSetPlayheadFn,
+    };
+    return selector ? selector(state) : state;
+  }),
 }));
 
 describe("Playhead", () => {
@@ -53,42 +62,21 @@ describe("Playhead", () => {
 
   describe("Rendering", () => {
     it("should render playhead at correct position", () => {
-      const { container } = render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      const { container } = render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const playhead = container.querySelector('[class*="absolute"]');
       expect(playhead).toBeInTheDocument();
     });
 
     it("should render playhead handle SVG", () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const svg = document.querySelector("svg");
       expect(svg).toBeInTheDocument();
     });
 
     it("should render invisible click/drag area", () => {
-      const { container } = render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      const { container } = render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
       expect(dragArea).toBeInTheDocument();
@@ -101,14 +89,7 @@ describe("Playhead", () => {
 
   describe("Click to Seek", () => {
     it("should update playhead on timeline click", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -124,14 +105,7 @@ describe("Playhead", () => {
     });
 
     it("should seek to 0% when clicked at left edge", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -149,14 +123,7 @@ describe("Playhead", () => {
     });
 
     it("should seek to 100% when clicked at right edge", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
       const rect = dragArea.getBoundingClientRect();
@@ -167,21 +134,12 @@ describe("Playhead", () => {
       });
 
       await waitFor(() => {
-        expect(mockSetPlayhead).toHaveBeenCalledWith(
-          expect.closeTo(100, 0.1)
-        );
+        expect(mockSetPlayhead).toHaveBeenCalledWith(expect.closeTo(100, 0.1));
       });
     });
 
     it("should seek to 50% when clicked at center", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
       const rect = dragArea.getBoundingClientRect();
@@ -193,21 +151,12 @@ describe("Playhead", () => {
       });
 
       await waitFor(() => {
-        expect(mockSetPlayhead).toHaveBeenCalledWith(
-          expect.closeTo(50, 1)
-        );
+        expect(mockSetPlayhead).toHaveBeenCalledWith(expect.closeTo(50, 1));
       });
     });
 
     it("should ignore non-left mouse button clicks", () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -221,14 +170,7 @@ describe("Playhead", () => {
     });
 
     it("should not seek when duration is 0", () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={0}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={0} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -248,14 +190,7 @@ describe("Playhead", () => {
 
   describe("Drag Scrubbing", () => {
     it("should update playhead while dragging", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -276,14 +211,7 @@ describe("Playhead", () => {
     });
 
     it("should handle rapid dragging (scrubbing)", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -306,14 +234,7 @@ describe("Playhead", () => {
     });
 
     it("should stop updating on pointer up", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -337,14 +258,7 @@ describe("Playhead", () => {
     });
 
     it("should clamp playhead to timeline bounds while dragging", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={10}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={10} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -360,20 +274,13 @@ describe("Playhead", () => {
 
       await waitFor(() => {
         expect(mockSetPlayhead).toHaveBeenCalledWith(
-          expect.closeTo(10, 0.1) // Clamped to duration
+          expect.closeTo(10, 0.1), // Clamped to duration
         );
       });
     });
 
     it("should handle dragging before timeline start", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={10}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={10} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -389,20 +296,13 @@ describe("Playhead", () => {
 
       await waitFor(() => {
         expect(mockSetPlayhead).toHaveBeenCalledWith(
-          expect.closeTo(0, 0.1) // Clamped to 0
+          expect.closeTo(0, 0.1), // Clamped to 0
         );
       });
     });
 
     it("should handle dragging beyond bounds on left", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
       const rect = dragArea.getBoundingClientRect();
@@ -418,21 +318,12 @@ describe("Playhead", () => {
       });
 
       await waitFor(() => {
-        expect(mockSetPlayhead).toHaveBeenCalledWith(
-          expect.closeTo(0, 0.1)
-        );
+        expect(mockSetPlayhead).toHaveBeenCalledWith(expect.closeTo(0, 0.1));
       });
     });
 
     it("should handle dragging beyond bounds on right", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
       const rect = dragArea.getBoundingClientRect();
@@ -448,9 +339,7 @@ describe("Playhead", () => {
       });
 
       await waitFor(() => {
-        expect(mockSetPlayhead).toHaveBeenCalledWith(
-          expect.closeTo(100, 0.1)
-        );
+        expect(mockSetPlayhead).toHaveBeenCalledWith(expect.closeTo(100, 0.1));
       });
     });
   });
@@ -461,62 +350,28 @@ describe("Playhead", () => {
 
   describe("Scrolling", () => {
     it("should adjust playhead position based on scroll", () => {
-      const { container, rerender } = render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      const { container, rerender } = render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
-      const initialPlayhead = container.querySelector(
-        '[class*="absolute"][class*="z-40"]'
-      );
+      const initialPlayhead = container.querySelector('[class*="absolute"][class*="z-40"]');
 
       // Re-render with scroll
-      rerender(
-        <Playhead
-          coords={coords}
-          scrollLeft={100}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      rerender(<Playhead coords={coords} scrollLeft={100} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       expect(initialPlayhead).toBeInTheDocument();
     });
 
     it("should handle negative scroll values", () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={-50}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={-50} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       // Should not throw
-      expect(
-        screen.getByLabelText("Timeline scrubber")
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Timeline scrubber")).toBeInTheDocument();
     });
 
     it("should handle very large scroll values", () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={10000}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={10000} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       // Should not throw
-      expect(
-        screen.getByLabelText("Timeline scrubber")
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Timeline scrubber")).toBeInTheDocument();
     });
   });
 
@@ -528,14 +383,7 @@ describe("Playhead", () => {
     it("should handle null container ref gracefully", () => {
       const nullRef = { current: null };
 
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={nullRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={nullRef as React.RefObject<HTMLDivElement>} />);
 
       // Clicking should not throw
       const dragArea = screen.getByLabelText("Timeline scrubber");
@@ -548,14 +396,7 @@ describe("Playhead", () => {
     });
 
     it("should handle very small duration", () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={0.001}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={0.001} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -565,9 +406,7 @@ describe("Playhead", () => {
       });
 
       // Should clamp to duration
-      expect(mockSetPlayhead).toHaveBeenCalledWith(
-        expect.closeTo(0.001, 0.0001)
-      );
+      expect(mockSetPlayhead).toHaveBeenCalledWith(expect.closeTo(0.001, 0.0001));
     });
 
     it("should handle very large duration", () => {
@@ -577,7 +416,7 @@ describe("Playhead", () => {
           scrollLeft={0}
           duration={10800} // 3 hours
           containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
+        />,
       );
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
@@ -597,14 +436,7 @@ describe("Playhead", () => {
         timeToPixels: () => NaN,
       } as unknown as CoordinateSystem;
 
-      render(
-        <Playhead
-          coords={badCoords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={badCoords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -620,14 +452,7 @@ describe("Playhead", () => {
     });
 
     it("should handle fractional pixel positions", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -643,14 +468,7 @@ describe("Playhead", () => {
     });
 
     it("should handle rapid click and release", async () => {
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
       const dragArea = screen.getByLabelText("Timeline scrubber");
 
@@ -672,18 +490,9 @@ describe("Playhead", () => {
         setPlayhead: mockSetPlayhead,
       });
 
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
-      expect(
-        screen.getByLabelText("Timeline scrubber")
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Timeline scrubber")).toBeInTheDocument();
     });
 
     it("should handle playhead at exactly duration", () => {
@@ -692,18 +501,9 @@ describe("Playhead", () => {
         setPlayhead: mockSetPlayhead,
       });
 
-      render(
-        <Playhead
-          coords={coords}
-          scrollLeft={0}
-          duration={100}
-          containerRef={containerRef as React.RefObject<HTMLDivElement>}
-        />
-      );
+      render(<Playhead coords={coords} scrollLeft={0} duration={100} containerRef={containerRef as React.RefObject<HTMLDivElement>} />);
 
-      expect(
-        screen.getByLabelText("Timeline scrubber")
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Timeline scrubber")).toBeInTheDocument();
     });
   });
 });
