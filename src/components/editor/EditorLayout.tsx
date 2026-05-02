@@ -9,7 +9,7 @@ import { useProjectStore } from "../../store/projectStore";
 import type { Clip } from "../../types";
 
 export const EditorLayout: React.FC = () => {
-  const { tracks, addClip, getTimelineEndTime } = useTimelineStore();
+  const { tracks, addClip, addTrack, getTimelineEndTime } = useTimelineStore();
   const { mediaAssets, project } = useProjectStore();
   const DEFAULT_STILL_DURATION = 5;
 
@@ -28,7 +28,16 @@ export const EditorLayout: React.FC = () => {
     const targetTrackType = mediaAsset.type === "audio" ? "audio" : "video";
 
     // Find the first track of the appropriate type
-    const targetTrack = tracks.find((track) => track.type === targetTrackType) ?? tracks[0];
+    let targetTrack = tracks.find((track) => track.type === targetTrackType);
+
+    // If no track exists for this type, create one
+    if (!targetTrack) {
+      console.log("[EditorLayout] No track found for type:", targetTrackType, "- creating one");
+      addTrack(targetTrackType);
+      // Get the newly created track
+      targetTrack = useTimelineStore.getState().tracks.find((t) => t.type === targetTrackType);
+    }
+
     if (!targetTrack) return;
 
     // Get the end time of all existing clips (optimized - calculated once in store)
@@ -60,12 +69,14 @@ export const EditorLayout: React.FC = () => {
     <div className="w-full h-full flex flex-col bg-bg overflow-hidden rounded-md">
       <TopBar />
 
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-        <div className="flex-1 min-h-0 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden space-y-1.5">
+        <div className="flex-1 min-h-0 flex overflow-hidden space-x-1.5">
           <MediaPanel onAddToTimeline={handleAddToTimeline} />
+
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <PreviewPanel />
           </div>
+
           <PropertiesPanel />
         </div>
 

@@ -14,7 +14,7 @@ import { usePlayback } from "../../../hooks/usePlayback";
 import type { VideoMetadata, Clip } from "../../../types";
 
 export const Timeline: React.FC = () => {
-  const { tracks, clips, pixelsPerSecond, scrollLeft, setScrollLeft, getTimelineEndTime, addClip } = useTimelineStore();
+  const { tracks, clips, pixelsPerSecond, scrollLeft, setScrollLeft, getTimelineEndTime, addClip, addTrack } = useTimelineStore();
   const { mediaAssets, addMediaAsset } = useProjectStore();
   const { currentTime, duration, seek, setDuration } = usePlayback();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -106,7 +106,15 @@ export const Timeline: React.FC = () => {
 
           // Add clip to timeline at end
           const targetTrackType = asset.type === "audio" ? "audio" : "video";
-          const targetTrack = tracks.find((t) => t.type === targetTrackType) || tracks[0];
+          let targetTrack = tracks.find((t) => t.type === targetTrackType);
+
+          // If no track exists for this type, create one
+          if (!targetTrack) {
+            console.log("[Timeline] No track found for type:", targetTrackType, "- creating one");
+            addTrack(targetTrackType);
+            // Get the newly created track
+            targetTrack = useTimelineStore.getState().tracks.find((t) => t.type === targetTrackType);
+          }
 
           if (targetTrack) {
             const newClip: Clip = {
@@ -133,7 +141,7 @@ export const Timeline: React.FC = () => {
         }
       }
     },
-    [mediaAssets, addMediaAsset, tracks, getTimelineEndTime, addClip],
+    [mediaAssets, addMediaAsset, tracks, getTimelineEndTime, addClip, addTrack],
   );
 
   // Listen for drag events and handle file drops
