@@ -234,7 +234,7 @@ export const FONT_META: Record<FontFamily, { name: string; stack: string }> = {
   serif: { name: "Serif", stack: fontFamilies.serif },
 };
 
-function applyTheme(theme: Theme) {
+export function applyTheme(theme: Theme) {
   const root = document.documentElement;
   const themeColors = themes[theme];
 
@@ -243,8 +243,16 @@ function applyTheme(theme: Theme) {
   });
 }
 
-function applyFontFamily(fontFamily: FontFamily) {
+export function applyFontFamily(fontFamily: FontFamily) {
   const root = document.documentElement;
   root.style.setProperty("--font-sans", fontFamilies[fontFamily]);
-  document.body.style.fontFamily = fontFamilies[fontFamily];
+  if (document.body) {
+    document.body.style.fontFamily = fontFamilies[fontFamily];
+  }
+}
+
+export function initSettings() {
+  const state = useSettingsStore.getState();
+  applyTheme(state.theme);
+  applyFontFamily(state.fontFamily);
 }
