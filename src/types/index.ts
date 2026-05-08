@@ -26,6 +26,12 @@ export interface ThumbnailTile {
   time: number;
   path: string;
   density: DensityLevel;
+  atlas_coords?: {
+    col: number;
+    row: number;
+    thumb_width: number;
+    thumb_height: number;
+  };
 }
 
 export interface FilmstripState {

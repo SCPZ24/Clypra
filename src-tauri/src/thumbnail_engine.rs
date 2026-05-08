@@ -51,14 +51,66 @@ impl fmt::Display for ExtractionError {
 }
 
 /// Thumbnail tile for streaming results to frontend
+/// Supports both legacy per-frame files and new atlas-based storage
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThumbnailTile {
     /// Timestamp in seconds
     pub time: f64,
-    /// Filesystem path to cached thumbnail
+    /// Filesystem path to cached thumbnail or atlas
     pub path: String,
     /// Density level used for this tile
     pub density: DensityLevel,
+    /// Atlas coordinates (if using atlas storage)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub atlas_coords: Option<AtlasCoords>,
+}
+
+/// Atlas coordinates for extracting thumbnail from sprite sheet
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AtlasCoords {
+    /// Column in atlas (0-7)
+    pub col: u32,
+    /// Row in atlas (0-3)
+    pub row: u32,
+    /// Thumbnail width in pixels
+    pub thumb_width: u32,
+    /// Thumbnail height in pixels
+    pub thumb_height: u32,
+}
+
+impl ThumbnailTile {
+    /// Create a legacy per-frame tile
+    pub fn from_path(time: f64, path: String, density: DensityLevel) -> Self {
+        Self {
+            time,
+            path,
+            density,
+            atlas_coords: None,
+        }
+    }
+
+    /// Create an atlas-based tile
+    pub fn from_atlas(
+        time: f64,
+        atlas_path: String,
+        density: DensityLevel,
+        col: u32,
+        row: u32,
+        thumb_width: u32,
+        thumb_height: u32,
+    ) -> Self {
+        Self {
+            time,
+            path: atlas_path,
+            density,
+            atlas_coords: Some(AtlasCoords {
+                col,
+                row,
+                thumb_width,
+                thumb_height,
+            }),
+        }
+    }
 }
 
 /// Resolution tier for high-DPI displays

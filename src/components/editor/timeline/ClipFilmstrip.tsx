@@ -112,12 +112,76 @@ export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, 
 
       receivedCountRef.current++;
 
-      const src = tile.path.startsWith("data:") ? tile.path : convertFileSrc(tile.path);
-      const key = roundMs(tile.time);
-      setFrameCache((prev) => {
-        const next = new Map(prev);
-        next.set(key, src);
-        return next;
+      // Handle atlas-based tiles
+      if (tile.atlas_coords) {
+        // Extract thumbnail from atlas sprite sheet
+        extractThumbnailFromAtlas(tile.path, tile.atlas_coords)
+          .then((dataUrl) => {
+            const key = roundMs(tile.time);
+            setFrameCache((prev) => {
+              const next = new Map(prev);
+              next.set(key, dataUrl);
+              return next;
+            });
+          })
+          .catch((err) => {
+            console.error(`[ClipFilmstrip] Failed to extract atlas tile at ${tile.time}s:`, err);
+          });
+      } else {
+        // Legacy per-frame tile
+        const src = tile.path.startsWith("data:") ? tile.path : convertFileSrc(tile.path);
+        const key = roundMs(tile.time);
+        setFrameCache((prev) => {
+          const next = new Map(prev);
+          next.set(key, src);
+          return next;
+        });
+      }
+    };
+
+    // Helper function to extract thumbnail from atlas
+    const extractThumbnailFromAtlas = async (atlasPath: string, coords: { col: number; row: number; thumb_width: number; thumb_height: number }): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = convertFileSrc(atlasPath);
+
+        img.onload = () => {
+          try {
+            // Create canvas to extract thumbnail
+            const canvas = document.createElement("canvas");
+            canvas.width = coords.thumb_width;
+            canvas.height = coords.thumb_height;
+            const ctx = canvas.getContext("2d");
+
+            if (!ctx) {
+              reject(new Error("Failed to get canvas context"));
+              return;
+            }
+
+            // Extract thumbnail from atlas at (col, row) position
+            ctx.drawImage(
+              img,
+              coords.col * coords.thumb_width, // source x
+              coords.row * coords.thumb_height, // source y
+              coords.thumb_width, // source width
+              coords.thumb_height, // source height
+              0,
+              0, // dest x, y
+              coords.thumb_width, // dest width
+              coords.thumb_height, // dest height
+            );
+
+            // Convert to data URL
+            resolve(canvas.toDataURL("image/webp"));
+          } catch (err) {
+            reject(err);
+          }
+        };
+
+        img.onerror = () => {
+          reject(new Error(`Failed to load atlas: ${atlasPath}`));
+        };
       });
     };
 

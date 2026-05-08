@@ -162,7 +162,7 @@ async fn decode_frame(
 }
 
 /// Extract multiple frames using the native decoder with streaming
-/// Same architecture as get_thumbnails_for_timestamps but uses native decoder
+/// Uses tile-based atlas system for efficient storage (32 thumbnails per sprite sheet)
 #[tauri::command]
 async fn decode_frames_streaming(
     video_path: String,
@@ -170,67 +170,79 @@ async fn decode_frames_streaming(
     density: DensityLevel,
     width: u32,
     height: u32,
-    duration: f64,
+    _duration: f64,
     on_tile: tauri::ipc::Channel<ThumbnailTile>,
 ) -> Result<(), String> {
+    use thumbnail_engine::atlas::{get_atlas_manager, AtlasBuilder, THUMBNAILS_PER_ATLAS};
+    
     let start = std::time::Instant::now();
     let video_id = format!("{:x}", md5::compute(&video_path));
     let resolution_tier = if width >= 160 { ResolutionTier::Tier2x } else { ResolutionTier::Tier1x };
     
-    eprintln!("[decode_frames_streaming] START video_id={} timestamps={} density={:?} size={}x{}", 
+    eprintln!("[decode_frames_streaming] START video_id={} timestamps={} density={:?} size={}x{} (ATLAS MODE)", 
               video_id, timestamps.len(), density, width, height);
     
-    // Get or create video cache entry for cache checks
-    let video_cache = thumbnail_engine::get_video_cache(&video_path, duration).await;
+    // Get cache directory
+    let cache_dir = match GLOBAL_CACHE.cache_dir().await {
+        Some(dir) => dir,
+        None => return Err("Cache not initialized".to_string()),
+    };
     
-    // Check cache for existing frames
+    // Get atlas manager for this video
+    let atlas_manager = get_atlas_manager(&video_id, density, resolution_tier, cache_dir).await;
+    
+    // Check which frames are already in atlases
     let mut missing_times = Vec::new();
-    let mut cache_hits = 0u32;
     let mut sent_count = 0u32;
     
-    for &time in &timestamps {
-        if let Some((path, found_density)) = video_cache.get_frame_path(time, density) {
-            cache_hits += 1;
-            let path_str = path.to_string_lossy().to_string();
-            if cache_hits <= 3 {
-                eprintln!("[decode_frames_streaming] Initial cache hit #{}: time={:.2}s, path={}", 
-                          cache_hits, time, &path_str[..80.min(path_str.len())]);
-            }
-            // Send cached tile immediately
-            match on_tile.send(ThumbnailTile {
-                time,
-                path: path_str.clone(),
-                density: found_density,
-            }) {
-                Ok(_) => {
-                    sent_count += 1;
-                    eprintln!("[STREAM] Sent cached frame #{}/{}: time={:.2}s", sent_count, timestamps.len(), time);
+    {
+        let manager = atlas_manager.read().await;
+        for &time in &timestamps {
+            if let Some(location) = manager.get_location(time) {
+                // Frame exists in atlas - send immediately
+                let tile = ThumbnailTile::from_atlas(
+                    time,
+                    location.atlas_path.to_string_lossy().to_string(),
+                    density,
+                    location.col,
+                    location.row,
+                    width,
+                    height,
+                );
+                
+                match on_tile.send(tile) {
+                    Ok(_) => {
+                        sent_count += 1;
+                        if sent_count <= 3 {
+                            eprintln!("[STREAM] Sent cached atlas tile #{}: time={:.2}s atlas={} pos=({},{})", 
+                                      sent_count, time, location.atlas_index, location.col, location.row);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[STREAM] ✗ Failed to send cached tile: {:?}", e);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("[STREAM] ✗ Failed to send cached tile: {:?}", e);
-                }
+            } else {
+                missing_times.push(time);
             }
-        } else {
-            missing_times.push(time);
         }
     }
     
-    eprintln!("[decode_frames_streaming] Cache check: hits={} missing={} sent={}", cache_hits, missing_times.len(), sent_count);
+    eprintln!("[decode_frames_streaming] Atlas check: cached={} missing={}", sent_count, missing_times.len());
     
     // If all cached, return early
     if missing_times.is_empty() {
-        eprintln!("[decode_frames_streaming] All cached, returning early ({:?})", start.elapsed());
+        eprintln!("[decode_frames_streaming] All cached in atlases, returning early ({:?})", start.elapsed());
         return Ok(());
     }
     
-    // Spawn extraction task and AWAIT it — invoke won't resolve until all frames are streamed.
-    // This ensures the frontend's .then() fires after all frames have arrived via the channel.
+    // Spawn extraction task - build atlases from missing frames
     let total_frames = timestamps.len();
     let handle = tokio::spawn(async move {
         let bg_start = std::time::Instant::now();
-        eprintln!("[decode_frames_streaming] BG task starting, missing={}", missing_times.len());
+        eprintln!("[decode_frames_streaming] BG task starting, missing={} frames", missing_times.len());
         
-        // Get or create decoder for this video
+        // Get decoder
         let decoder = match get_decoder(&video_path).await {
             Ok(d) => {
                 eprintln!("[decode_frames_streaming] Decoder acquired ({:?})", bg_start.elapsed());
@@ -242,103 +254,100 @@ async fn decode_frames_streaming(
             }
         };
         
-        // Extract missing frames
+        // Process frames in batches of THUMBNAILS_PER_ATLAS (32)
         let mut frames_decoded = 0u32;
         let mut frames_failed = 0u32;
         let mut frames_sent = sent_count;
-        const BATCH_SIZE: usize = 10;
+        let mut atlases_created = 0u32;
         
-        for (batch_idx, time) in missing_times.iter().enumerate() {
-            let frame_start = std::time::Instant::now();
+        for chunk in missing_times.chunks(THUMBNAILS_PER_ATLAS) {
+            let chunk_start = std::time::Instant::now();
             
-            // Get cache path
-            let cache_path = match GLOBAL_CACHE.frame_path(&video_id, density, *time, resolution_tier).await {
-                Some(p) => p,
-                None => {
-                    eprintln!("[decode_frames_streaming] Cache not initialized");
+            // Create atlas builder
+            let mut atlas_builder = AtlasBuilder::new(width, height);
+            let mut chunk_frames: Vec<(f64, Vec<u8>)> = Vec::new();
+            
+            // Decode all frames in this chunk
+            for &time in chunk {
+                match decoder.lock().await.decode_frame(time, width, height) {
+                    Ok(rgba_bytes) => {
+                        chunk_frames.push((time, rgba_bytes));
+                        frames_decoded += 1;
+                    }
+                    Err(e) => {
+                        frames_failed += 1;
+                        if frames_failed <= 5 {
+                            eprintln!("[decode_frames_streaming] Decode failed at {}s: {}", time, e);
+                        }
+                    }
+                }
+            }
+            
+            if chunk_frames.is_empty() {
+                continue;
+            }
+            
+            // Allocate atlas locations and build atlas
+            let mut locations = Vec::new();
+            {
+                let mut manager = atlas_manager.write().await;
+                for (time, rgba_bytes) in &chunk_frames {
+                    let location = manager.allocate(*time);
+                    
+                    // Add thumbnail to atlas
+                    if let Err(e) = atlas_builder.add_thumbnail(rgba_bytes) {
+                        eprintln!("[decode_frames_streaming] Failed to add thumbnail to atlas: {}", e);
+                        continue;
+                    }
+                    
+                    locations.push((*time, location));
+                }
+            }
+            
+            // Save atlas to disk
+            if let Some((_, first_location)) = locations.first() {
+                if let Err(e) = atlas_builder.save(&first_location.atlas_path).await {
+                    eprintln!("[decode_frames_streaming] Failed to save atlas: {}", e);
                     continue;
                 }
-            };
+                
+                atlases_created += 1;
+                eprintln!("[decode_frames_streaming] Created atlas #{} with {} thumbnails in {:?}", 
+                          atlases_created, chunk_frames.len(), chunk_start.elapsed());
+            }
             
-            // Skip if already cached on disk (race with preload)
-            if cache_path.exists() {
-                let path_str = cache_path.to_string_lossy().to_string();
-                let _ = on_tile.send(ThumbnailTile {
-                    time: *time,
-                    path: path_str,
+            // Stream all tiles from this atlas to frontend
+            for (time, location) in locations {
+                let tile = ThumbnailTile::from_atlas(
+                    time,
+                    location.atlas_path.to_string_lossy().to_string(),
                     density,
-                });
-                frames_decoded += 1;
-                continue;
-            }
-            
-            // Decode frame using native decoder
-            let rgba_bytes = match decoder.lock().await.decode_frame(*time, width, height) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    frames_failed += 1;
-                    if frames_failed <= 5 {
-                        eprintln!("[decode_frames_streaming] Decode failed at {}s: {}", *time, e);
+                    location.col,
+                    location.row,
+                    width,
+                    height,
+                );
+                
+                match on_tile.send(tile) {
+                    Ok(_) => {
+                        frames_sent += 1;
+                        if frames_sent <= 3 || frames_sent % 20 == 0 {
+                            eprintln!("[STREAM] Sent atlas tile #{}/{}: time={:.2}s atlas={} pos=({},{})", 
+                                      frames_sent, total_frames, time, location.atlas_index, location.col, location.row);
+                        }
                     }
-                    continue;
-                }
-            };
-            
-            // Save to cache as WebP
-            if let Err(e) = save_rgba_as_webp(&rgba_bytes, width, height, &cache_path).await {
-                frames_failed += 1;
-                eprintln!("[decode_frames_streaming] Failed to save frame: {}", e);
-                continue;
-            }
-            
-            frames_decoded += 1;
-            
-            // Yield every BATCH_SIZE frames to keep runtime fair
-            if batch_idx % BATCH_SIZE == 0 && batch_idx > 0 {
-                tokio::task::yield_now().await;
-            }
-            
-            // Update in-memory cache
-            if let Some(vc) = GLOBAL_CACHE.get_video(&video_path) {
-                if let Some(level_cache) = vc.levels.get(&density) {
-                    let cached_frame = thumbnail_engine::CachedFrame::new(*time, cache_path.clone());
-                    level_cache.insert(*time, cached_frame);
-                    if let Ok(metadata) = std::fs::metadata(&cache_path) {
-                        GLOBAL_CACHE.total_size.fetch_add(metadata.len(), std::sync::atomic::Ordering::Relaxed);
+                    Err(e) => {
+                        eprintln!("[STREAM] ✗ Failed to send tile #{}: {:?}", frames_sent + 1, e);
                     }
                 }
             }
             
-            // Evict if needed
-            GLOBAL_CACHE.evict_if_needed().await;
-            
-            // Stream result to frontend
-            let path_str = cache_path.to_string_lossy().to_string();
-            match on_tile.send(ThumbnailTile {
-                time: *time,
-                path: path_str.clone(),
-                density,
-            }) {
-                Ok(_) => {
-                    frames_sent += 1;
-                    eprintln!("[STREAM] Sent decoded frame #{}/{}: time={:.2}s path={}", 
-                              frames_sent, total_frames, *time, 
-                              &path_str[path_str.len().saturating_sub(60)..]);
-                }
-                Err(e) => {
-                    eprintln!("[STREAM] ✗ Failed to send frame #{}: {:?}", frames_sent + 1, e);
-                }
-            }
-            
-            // Log first few frames and then every 20th
-            if frames_decoded <= 3 || frames_decoded % 20 == 0 {
-                eprintln!("[decode_frames_streaming] Frame {} at {:.2}s decoded+saved in {:?}", 
-                          frames_decoded, *time, frame_start.elapsed());
-            }
+            // Yield between atlas batches
+            tokio::task::yield_now().await;
         }
         
-        eprintln!("[decode_frames_streaming] BG task complete: decoded={} failed={} sent={}/{} total_time={:?}",
-                  frames_decoded, frames_failed, frames_sent, total_frames, bg_start.elapsed());
+        eprintln!("[decode_frames_streaming] BG task complete: decoded={} failed={} sent={}/{} atlases={} total_time={:?}",
+                  frames_decoded, frames_failed, frames_sent, total_frames, atlases_created, bg_start.elapsed());
     });
     
     // Await the task — invoke resolves only after all frames are streamed
