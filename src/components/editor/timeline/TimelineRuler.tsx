@@ -23,14 +23,14 @@ interface TimelineRulerProps {
 // [majorInterval in seconds, number of minor divisions between majors]
 // The ruler picks the first entry where majorInterval × pps ≥ MIN_LABEL_GAP_PX.
 const INTERVAL_TABLE: [number, number][] = [
-  [60, 6],   // 1min major, 10s minor
-  [30, 6],   // 30s major,  5s minor
-  [15, 5],   // 15s major,  3s minor
-  [10, 5],   // 10s major,  2s minor
-  [5, 5],   // 5s major,   1s minor
-  [3, 3],   // 3s major,   1s minor   ← CapCut uses this at ~27-50 pps
-  [2, 4],   // 2s major,   0.5s minor ← CapCut uses this at ~50-80 pps
-  [1, 5],   // 1s major,   0.2s minor (smallest — labels always whole seconds)
+  [60, 6], // 1min major, 10s minor
+  [30, 6], // 30s major,  5s minor
+  [15, 5], // 15s major,  3s minor
+  [10, 5], // 10s major,  2s minor
+  [5, 5], // 5s major,   1s minor
+  [3, 3], // 3s major,   1s minor   ← CapCut uses this at ~27-50 pps
+  [2, 4], // 2s major,   0.5s minor ← CapCut uses this at ~50-80 pps
+  [1, 5], // 1s major,   0.2s minor (smallest — labels always whole seconds)
 ];
 
 /** Minimum pixel gap between major (labelled) ticks */
@@ -81,9 +81,7 @@ export const TimelineRuler: React.FC<TimelineRulerProps> = ({ pixelsPerSecond, s
     const time = Math.round(t * 10000) / 10000;
     if (time < 0) continue;
 
-    const isMajor =
-      Math.abs(time % majorInterval) < minorInterval * 0.01 ||
-      Math.abs(time % majorInterval - majorInterval) < minorInterval * 0.01;
+    const isMajor = Math.abs(time % majorInterval) < minorInterval * 0.01 || Math.abs((time % majorInterval) - majorInterval) < minorInterval * 0.01;
 
     ticks.push({ time, isMajor });
   }
@@ -97,11 +95,7 @@ export const TimelineRuler: React.FC<TimelineRulerProps> = ({ pixelsPerSecond, s
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
-    <div
-      ref={containerRef}
-      className="relative h-6 select-none overflow-hidden"
-      style={{ background: "#1a1d23" }}
-    >
+    <div ref={containerRef} className="relative h-6 select-none overflow-hidden" style={{ background: "var(--color-timeline-ruler-bg)" }}>
       {ticks.map(({ time, isMajor }) => {
         const x = Math.round(time * pixelsPerSecond);
         return (
@@ -118,7 +112,7 @@ export const TimelineRuler: React.FC<TimelineRulerProps> = ({ pixelsPerSecond, s
               style={{
                 width: 1,
                 height: isMajor ? 10 : 5,
-                backgroundColor: isMajor ? "#4a505c" : "#2c3039",
+                backgroundColor: isMajor ? "var(--color-timeline-ruler-tick-major)" : "var(--color-timeline-ruler-tick-minor)",
               }}
             />
             {/* Label — CapCut places it right after the tick */}
@@ -130,7 +124,7 @@ export const TimelineRuler: React.FC<TimelineRulerProps> = ({ pixelsPerSecond, s
                   left: 3,
                   fontSize: 10,
                   lineHeight: 1,
-                  color: "#5c6370",
+                  color: "var(--color-timeline-ruler-text)",
                   whiteSpace: "nowrap",
                   pointerEvents: "none",
                   userSelect: "none",

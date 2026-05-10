@@ -39,12 +39,7 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
       return clip.startTime;
     }
     // Only shift if dragging and this is the target track
-    if (
-      dragState?.targetTrackId === track.id &&
-      dragState.insertionIndex != null &&
-      dragState.gapStartTime != null &&
-      dragState.gapDuration != null
-    ) {
+    if (dragState?.targetTrackId === track.id && dragState.insertionIndex != null && dragState.gapStartTime != null && dragState.gapDuration != null) {
       const clipIndex = sortedTrackClips.findIndex((c) => c.id === clip.id);
       const insertionIndex = dragState.insertionIndex;
       const gapDuration = dragState.gapDuration;
@@ -59,7 +54,7 @@ const TrackInner: React.FC<TrackProps> = ({ track, pixelsPerSecond, clips, onCli
   };
 
   return (
-    <div data-track-id={track.id} className={`relative border-b border-border transition-colors ${selectedTrackId === track.id ? "bg-[#1f242b]" : ""}`} style={{ height: `${track.height}px` }}>
+    <div data-track-id={track.id} className={`relative border-b border-border transition-colors ${selectedTrackId === track.id ? "bg-timeline-track-active" : ""}`} style={{ height: `${track.height}px` }}>
       {/* Clips layer */}
       {track.visible &&
         trackClips.map((clip) => {

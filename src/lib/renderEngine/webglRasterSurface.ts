@@ -82,8 +82,8 @@ interface AtlasCell {
 function packAtlas(artifacts: readonly TransportArtifact[], cols: number): { atlasW: number; atlasH: number; cellW: number; cellH: number; cells: AtlasCell[] } {
   if (artifacts.length === 0) return { atlasW: 1, atlasH: 1, cellW: 1, cellH: 1, cells: [] };
 
-  const cellW = Math.max(...artifacts.map(artifact => artifact.width));
-  const cellH = Math.max(...artifacts.map(artifact => artifact.height));
+  const cellW = Math.max(...artifacts.map((artifact) => artifact.width));
+  const cellH = Math.max(...artifacts.map((artifact) => artifact.height));
   const rows = Math.ceil(artifacts.length / cols);
   const atlasW = nextPow2(cols * cellW);
   const atlasH = nextPow2(rows * cellH);
@@ -224,31 +224,50 @@ export class WebGLRasterSurface {
       const cell = cells[artIdx];
       const art = artifacts[artIdx];
       const tileX = i * tileW;
-      const drawX = Math.round(tileX + (tileW - art.width) / 2);
-      const drawY = Math.round((tileH - art.height) / 2);
 
+      // Center-crop: scale bitmap to cover tile, then crop to fit
+      const bmpAspect = art.width / art.height;
+      const tileAspect = tileW / tileH;
+
+      let drawW: number, drawH: number, drawX: number, drawY: number;
+
+      if (bmpAspect > tileAspect) {
+        // Bitmap is wider - fit height, crop width
+        drawH = tileH;
+        drawW = Math.round(drawH * bmpAspect);
+        drawX = tileX - Math.round((drawW - tileW) / 2);
+        drawY = 0;
+      } else {
+        // Bitmap is taller - fit width, crop height
+        drawW = tileW;
+        drawH = Math.round(drawW / bmpAspect);
+        drawX = tileX;
+        drawY = Math.round((tileH - drawH) / 2);
+      }
+
+      // Clip to tile boundaries
       const left = Math.max(tileX, drawX, 0);
       const top = Math.max(0, drawY);
-      const right = Math.min(tileX + tileW, drawX + art.width, backingW);
-      const bottom = Math.min(tileH, drawY + art.height, backingH);
+      const right = Math.min(tileX + tileW, drawX + drawW, backingW);
+      const bottom = Math.min(tileH, drawY + drawH, backingH);
       const dstW = right - left;
       const dstH = bottom - top;
       if (dstW <= 0 || dstH <= 0) continue;
 
+      // Calculate source UV coordinates for the visible portion
       const srcX = left - drawX;
       const srcY = top - drawY;
-      const u0 = cell.u + srcX / atlasW;
-      const v0 = cell.v + srcY / atlasH;
-      const uw = dstW / atlasW;
-      const vh = dstH / atlasH;
+      const srcW = dstW;
+      const srcH = dstH;
+
+      // Map source pixels to atlas UV space
+      const u0 = cell.u + (srcX / drawW) * cell.uw;
+      const v0 = cell.v + (srcY / drawH) * cell.vh;
+      const uw = (srcW / drawW) * cell.uw;
+      const vh = (srcH / drawH) * cell.vh;
 
       rects.push({
-        pos: [
-          (left / backingW) * 2 - 1,
-          1 - (top / backingH) * 2,
-          (dstW / backingW) * 2,
-          (dstH / backingH) * 2,
-        ],
+        pos: [(left / backingW) * 2 - 1, 1 - (top / backingH) * 2, (dstW / backingW) * 2, (dstH / backingH) * 2],
         uv: [u0, v0, uw, vh],
       });
     }

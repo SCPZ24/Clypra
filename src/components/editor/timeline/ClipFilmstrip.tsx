@@ -13,15 +13,15 @@
  *   - Dims slightly during ballistic scroll (ISM hint)
  */
 
-import { useEffect, useRef, useMemo } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
-import { cn } from '@/lib/utils';
-import { InteractionState } from '../../../lib/renderEngine/types';
-import { createRasterSurface, type AnyRasterSurface } from '../../../lib/renderEngine/webglRasterSurface';
-import { useFilmstrip } from '../../../lib/useFilmstrip';
-import { getFilmstripTileWidthForTier } from '../../../lib/filmstripLayout';
-import { normalizePathForTauriInvoke } from '../../../lib/tauri';
-import type { Clip, MediaAsset } from '../../../types';
+import { useEffect, useRef, useMemo } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { cn } from "@/lib/utils";
+import { InteractionState } from "../../../lib/renderEngine/types";
+import { createRasterSurface, type AnyRasterSurface } from "../../../lib/renderEngine/webglRasterSurface";
+import { useFilmstrip } from "../../../lib/useFilmstrip";
+import { getFilmstripTileWidthForTier } from "../../../lib/filmstripLayout";
+import { normalizePathForTauriInvoke } from "../../../lib/tauri";
+import type { Clip, MediaAsset } from "../../../types";
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|tiff?|heic|heif|avif)$/i;
 
@@ -39,25 +39,16 @@ export interface ClipFilmstripProps {
   className?: string;
 }
 
-export function ClipFilmstrip({
-  clip,
-  mediaAsset,
-  clipWidthPx,
-  pixelsPerSecond,
-  stripHeightPx = 40,
-  className,
-}: ClipFilmstripProps) {
+export function ClipFilmstrip({ clip, mediaAsset, clipWidthPx, pixelsPerSecond, stripHeightPx = 40, className }: ClipFilmstripProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const surfaceRef = useRef<AnyRasterSurface | null>(null);
 
   const isVideoSource = useMemo(() => {
-    const path = mediaAsset.path ?? '';
-    return mediaAsset.type === 'video' && path.length > 0 && !IMAGE_EXT.test(path);
+    const path = mediaAsset.path ?? "";
+    return mediaAsset.type === "video" && path.length > 0 && !IMAGE_EXT.test(path);
   }, [mediaAsset.type, mediaAsset.path]);
 
-  const videoPath = isVideoSource && mediaAsset.path
-    ? normalizePathForTauriInvoke(mediaAsset.path)
-    : '';
+  const videoPath = isVideoSource && mediaAsset.path ? normalizePathForTauriInvoke(mediaAsset.path) : "";
 
   // ── Filmstrip data (replaces all inline extraction orchestration) ─────────
   const { artifacts, isFallback, interactionState, spatialTier } = useFilmstrip({
@@ -110,36 +101,22 @@ export function ClipFilmstrip({
   // Video filmstrip — canvas surface
   if (isVideoSource) {
     return (
-      <div
-        data-testid="clip-filmstrip"
-        className={cn(
-          'relative overflow-hidden rounded-[2px] border border-black/20 bg-[#0c2730]/40',
-          className,
-        )}
-        style={{ height: stripHeightPx, width: '100%', opacity, transition: 'opacity 80ms linear' }}
-      >
-        <canvas
-          ref={canvasRef}
-          style={{ display: 'block', width: '100%', height: '100%' }}
-        />
+      <div data-testid="clip-filmstrip" className={cn("relative overflow-hidden rounded-[2px] border border-timeline-filmstrip-border bg-timeline-filmstrip-bg", className)} style={{ height: stripHeightPx, width: "100%", opacity, transition: "opacity 80ms linear" }}>
+        <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} />
         {/* Poster overlay while artifacts load — fades out once canvas has content */}
         {isFallback && mediaAsset.posterFrame && (
           <img
-            src={
-              mediaAsset.posterFrame.startsWith('data:')
-                ? mediaAsset.posterFrame
-                : convertFileSrc(mediaAsset.posterFrame)
-            }
+            src={mediaAsset.posterFrame.startsWith("data:") ? mediaAsset.posterFrame : convertFileSrc(mediaAsset.posterFrame)}
             alt=""
             aria-hidden
             style={{
-              position: 'absolute',
+              position: "absolute",
               inset: 0,
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              objectPosition: 'center',
-              pointerEvents: 'none',
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center",
+              pointerEvents: "none",
             }}
             draggable={false}
           />
@@ -151,31 +128,12 @@ export function ClipFilmstrip({
   // Image asset — poster only
   if (mediaAsset.posterFrame) {
     return (
-      <div
-        data-testid="clip-filmstrip-fallback"
-        className={cn('relative overflow-hidden rounded-[2px] border border-black/20', className)}
-        style={{ height: stripHeightPx, width: '100%' }}
-      >
-        <img
-          src={
-            mediaAsset.posterFrame.startsWith('data:')
-              ? mediaAsset.posterFrame
-              : convertFileSrc(mediaAsset.posterFrame)
-          }
-          alt=""
-          className="absolute inset-0 block h-full w-full object-cover select-none"
-          draggable={false}
-        />
+      <div data-testid="clip-filmstrip-fallback" className={cn("relative overflow-hidden rounded-[2px] border border-timeline-filmstrip-border", className)} style={{ height: stripHeightPx, width: "100%" }}>
+        <img src={mediaAsset.posterFrame.startsWith("data:") ? mediaAsset.posterFrame : convertFileSrc(mediaAsset.posterFrame)} alt="" className="absolute inset-0 block h-full w-full object-cover select-none" draggable={false} />
       </div>
     );
   }
 
   // Empty placeholder
-  return (
-    <div
-      data-testid="clip-filmstrip-empty"
-      className={cn('w-full rounded-[2px] bg-[#0c2730]/60', className)}
-      style={{ height: stripHeightPx }}
-    />
-  );
+  return <div data-testid="clip-filmstrip-empty" className={cn("w-full rounded-[2px] bg-timeline-filmstrip-empty", className)} style={{ height: stripHeightPx }} />;
 }

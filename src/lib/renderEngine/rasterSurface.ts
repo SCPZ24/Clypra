@@ -17,7 +17,7 @@
  *   surface.dispose();
  */
 
-import type { TransportArtifact } from './transport';
+import type { TransportArtifact } from "./transport";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,9 +44,9 @@ export class RasterSurface {
 
   constructor(canvas: HTMLCanvasElement) {
     this._canvas = canvas;
-    this._ctx = canvas.getContext('2d', {
-      alpha: false,             // opaque — no premul alpha overhead
-      desynchronized: true,    // hint: don't wait for vsync for offscreen paint
+    this._ctx = canvas.getContext("2d", {
+      alpha: false, // opaque — no premul alpha overhead
+      desynchronized: true, // hint: don't wait for vsync for offscreen paint
     });
   }
 
@@ -61,7 +61,7 @@ export class RasterSurface {
       this._canvas.width = backingW;
       this._canvas.height = backingH;
       // Reset CSS size to logical pixels (canvas sizing clears it)
-      this._canvas.style.width  = `${clipWidthPx}px`;
+      this._canvas.style.width = `${clipWidthPx}px`;
       this._canvas.style.height = `${stripHeightPx}px`;
     }
   }
@@ -79,10 +79,7 @@ export class RasterSurface {
    * fixed width, and native bitmaps are clipped into those slots without passing
    * destination width/height to drawImage().
    */
-  drawFilmstrip(
-    artifacts: readonly TransportArtifact[],
-    layout: FilmstripLayout,
-  ): void {
+  drawFilmstrip(artifacts: readonly TransportArtifact[], layout: FilmstripLayout): void {
     if (this._disposed || !this._ctx) return;
     if (artifacts.length === 0) {
       this._clear(layout);
@@ -98,7 +95,7 @@ export class RasterSurface {
     const backingH = this._canvas.height;
 
     // Clear with background
-    ctx.fillStyle = '#0c2730';
+    ctx.fillStyle = "#0c2730";
     ctx.fillRect(0, 0, backingW, backingH);
 
     // Tile layout is quantized. The final tile may overflow and is clipped by canvas bounds.
@@ -122,30 +119,38 @@ export class RasterSurface {
   }
 
   /**
-   * Draw a single tile by clipping native bitmap pixels into a fixed tile slot.
-   * This intentionally avoids destination width/height drawImage arguments.
+   * Draw a single tile by center-cropping the bitmap to fill the tile completely.
+   * Scales to cover, then clips to tile boundaries - no gaps, no letterboxing.
    */
-  private _drawTile(
-    ctx: CanvasRenderingContext2D,
-    bitmap: ImageBitmap,
-    bmpW: number,
-    bmpH: number,
-    x: number,
-    y: number,
-    tileW: number,
-    tileH: number,
-  ): void {
+  private _drawTile(ctx: CanvasRenderingContext2D, bitmap: ImageBitmap, bmpW: number, bmpH: number, x: number, y: number, tileW: number, tileH: number): void {
     if (bmpW === 0 || bmpH === 0 || tileW === 0 || tileH === 0) return;
 
-    const drawX = Math.round(x + (tileW - bmpW) / 2);
-    const drawY = Math.round(y + (tileH - bmpH) / 2);
+    // Center-crop: scale bitmap to cover tile, then crop to fit
+    const bmpAspect = bmpW / bmpH;
+    const tileAspect = tileW / tileH;
+
+    let drawW: number, drawH: number, drawX: number, drawY: number;
+
+    if (bmpAspect > tileAspect) {
+      // Bitmap is wider - fit height, crop width
+      drawH = tileH;
+      drawW = Math.round(drawH * bmpAspect);
+      drawX = Math.round(x - (drawW - tileW) / 2);
+      drawY = y;
+    } else {
+      // Bitmap is taller - fit width, crop height
+      drawW = tileW;
+      drawH = Math.round(drawW / bmpAspect);
+      drawX = x;
+      drawY = Math.round(y + (tileH - drawH) / 2);
+    }
 
     ctx.save();
     ctx.beginPath();
     ctx.rect(Math.round(x), Math.round(y), Math.round(tileW), Math.round(tileH));
     ctx.clip();
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(bitmap, drawX, drawY);
+    ctx.drawImage(bitmap, drawX, drawY, drawW, drawH);
     ctx.restore();
   }
 
@@ -157,16 +162,7 @@ export class RasterSurface {
     const ctx = this._ctx;
     const { clipWidthPx, stripHeightPx, dpr } = layout;
 
-    this._drawTile(
-      ctx,
-      bitmap,
-      bitmap.width,
-      bitmap.height,
-      0,
-      0,
-      Math.round(clipWidthPx * dpr),
-      Math.round(stripHeightPx * dpr),
-    );
+    this._drawTile(ctx, bitmap, bitmap.width, bitmap.height, 0, 0, Math.round(clipWidthPx * dpr), Math.round(stripHeightPx * dpr));
   }
 
   /** Draw a placeholder (waiting for decode). */
@@ -178,22 +174,18 @@ export class RasterSurface {
 
   // ── Edge Fade ────────────────────────────────────────────────────────────────
 
-  private _drawEdgeFade(
-    ctx: CanvasRenderingContext2D,
-    w: number,
-    h: number,
-  ): void {
+  private _drawEdgeFade(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const fadeW = Math.min(6, w * 0.05);
 
     const left = ctx.createLinearGradient(0, 0, fadeW, 0);
-    left.addColorStop(0, 'rgba(0,0,0,0.35)');
-    left.addColorStop(1, 'rgba(0,0,0,0)');
+    left.addColorStop(0, "rgba(0,0,0,0.35)");
+    left.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = left;
     ctx.fillRect(0, 0, fadeW, h);
 
     const right = ctx.createLinearGradient(w - fadeW, 0, w, 0);
-    right.addColorStop(0, 'rgba(0,0,0,0)');
-    right.addColorStop(1, 'rgba(0,0,0,0.35)');
+    right.addColorStop(0, "rgba(0,0,0,0)");
+    right.addColorStop(1, "rgba(0,0,0,0.35)");
     ctx.fillStyle = right;
     ctx.fillRect(w - fadeW, 0, fadeW, h);
   }
@@ -201,7 +193,7 @@ export class RasterSurface {
   private _clear(layout: FilmstripLayout): void {
     if (!this._ctx) return;
     this._applyLayout(layout);
-    this._ctx.fillStyle = '#0c2730';
+    this._ctx.fillStyle = "#0c2730";
     this._ctx.fillRect(0, 0, this._canvas.width, this._canvas.height);
   }
 
@@ -230,5 +222,7 @@ export class RasterSurface {
     this._ctx = null;
   }
 
-  get isDisposed(): boolean { return this._disposed; }
+  get isDisposed(): boolean {
+    return this._disposed;
+  }
 }

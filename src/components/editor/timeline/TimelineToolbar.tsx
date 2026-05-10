@@ -100,7 +100,7 @@ export const TimelineToolbar: React.FC = () => {
 
   return (
     <TooltipProvider>
-      <div data-timeline-interactive="true" className="h-12 border-b border-[#2c2f34] flex items-center px-3 gap-2">
+      <div data-timeline-interactive="true" className="h-12 border-b border-timeline-toolbar-border flex items-center px-3 gap-2">
         <div className="flex items-center gap-1">
           <Tool label="Add video track">
             <Button variant="ghost" size="icon-sm" className={toolButton} onClick={() => addTrack("video")}>
@@ -139,7 +139,7 @@ export const TimelineToolbar: React.FC = () => {
               <Waves className="w-4 h-4" />
             </Button>
           </Tool>
-          <div className="w-px h-6 bg-[#30343a] mx-1" />
+          <div className="w-px h-6 bg-timeline-toolbar-divider mx-1" />
           <Tool label="Record audio">
             <Button variant="ghost" size="icon-sm" className={toolButton}>
               <Mic className="w-4 h-4" />

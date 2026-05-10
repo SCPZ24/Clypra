@@ -243,7 +243,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
   }, [isResizing, resizeStart, clip.id, pixelsPerSecond, updateClip, rippleTrimClip, mediaAsset]);
 
   const getClipColor = () => {
-    if (mediaAsset?.type === "audio") return "bg-[#153840] border-[#30a7c8]/40";
+    if (mediaAsset?.type === "audio") return "bg-timeline-clip-audio border-timeline-clip-audio-border";
     return "bg-accent";
   };
 
@@ -263,7 +263,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
-      className={`absolute h-full rounded-sm overflow-hidden border ${selected ? "border-red-500 border-2" : ""} ${isResizing ? (resizeStart?.isRipple ? "ring-2 ring-yellow-500" : "ring-2 ring-cyan-500") : ""} ${locked ? "cursor-not-allowed" : isDragging ? (isInvalidPosition ? "cursor-not-allowed" : "cursor-grabbing") : "cursor-default"} ${getClipColor()} transition-none`}
+      className={`absolute h-full rounded-sm overflow-hidden border-2 ${selected ? "border-red-500" : ""} ${isResizing ? (resizeStart?.isRipple ? "ring-2 ring-yellow-500" : "ring-2 ring-cyan-500") : ""} ${locked ? "cursor-not-allowed" : isDragging ? (isInvalidPosition ? "cursor-not-allowed" : "cursor-grabbing") : "cursor-default"} ${getClipColor()} transition-none`}
       style={{
         left: `${displayLeft}px`,
         width: `${width}px`,
@@ -273,7 +273,7 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
         boxShadow: "none",
         transformOrigin: isDragging ? "0 0" : undefined,
         transform: isDragging ? `translateY(${dragState?.offsetY ?? 0}px)` : "none",
-        border: isInvalidPosition ? "2px solid #ef4444" : undefined,
+        border: isInvalidPosition ? "2px solid var(--color-timeline-clip-invalid)" : undefined,
       }}
     >
       {/* Left trim handle */}
@@ -290,8 +290,8 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
       {/* Clip content */}
       <div className="flex h-full min-h-0 w-full flex-col gap-1 overflow-hidden px-1 py-1">
         <div className="flex shrink-0 items-center gap-3">
-          <div className="text-[9px] font-semibold tracking-[0.01em] text-[#d8edf1] truncate">{mediaAsset?.name || "Clip"}</div>
-          <div className="text-[9px] font-medium text-[#b9e0e6] shrink-0">{formatDuration(clip.duration)}</div>
+          <div className="text-[9px] font-semibold tracking-[0.01em] text-timeline-clip-text truncate">{mediaAsset?.name || "Clip"}</div>
+          <div className="text-[9px] font-medium text-timeline-clip-duration shrink-0">{formatDuration(clip.duration)}</div>
         </div>
         {mediaAsset && (mediaAsset.type === "video" || mediaAsset.type === "image") ? (
           <div className="flex min-h-0 w-full flex-1 items-center">
@@ -301,12 +301,12 @@ const ClipInner: React.FC<ClipProps> = ({ clip, mediaAsset, pixelsPerSecond, sel
           mediaAsset.posterFrame ? (
             <img src={mediaAsset.posterFrame} alt="" className="h-8 w-full rounded-[2px] border border-black/20 object-cover" draggable={false} />
           ) : (
-            <div className="h-8 w-full rounded-[2px] bg-[#0c2730]/60" />
+            <div className="h-8 w-full rounded-[2px] bg-timeline-filmstrip-empty" />
           )
         ) : mediaAsset?.posterFrame ? (
           <img src={mediaAsset.posterFrame} alt="" className="h-8 w-full rounded-[2px] border border-black/20 object-cover" draggable={false} />
         ) : (
-          <div className="h-8 w-full rounded-[2px] bg-[#0c2730]/60" />
+          <div className="h-8 w-full rounded-[2px] bg-timeline-filmstrip-empty" />
         )}
       </div>
 

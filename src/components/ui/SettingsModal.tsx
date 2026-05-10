@@ -1,15 +1,8 @@
 import React, { useState } from "react";
-import { Check, Palette, SlidersHorizontal, Info } from "lucide-react";
+import { Check, Palette, SlidersHorizontal, Info, Paintbrush, RotateCcw, Copy, Download, Upload } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Modal } from "./Modal";
-import {
-  useSettingsStore,
-  Theme,
-  FontFamily,
-  THEME_META,
-  FONT_META,
-  getThemeColors,
-} from "../../store/settingsStore";
+import { useSettingsStore, Theme, FontFamily, THEME_META, FONT_META, getThemeColors, getBaseThemeForCustomization, getThemeColorKeys } from "../../store/settingsStore";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -24,9 +17,9 @@ const TABS: { id: Tab; label: string; icon: React.FC<{ className?: string }> }[]
   { id: "about", label: "About", icon: Info },
 ];
 
-// ─── Mini theme preview ──────────────────────────────────────────────────
-function ThemeSwatch({ themeId, selected, onSelect }: { themeId: Theme; selected: boolean; onSelect: () => void }) {
-  const colors = getThemeColors(themeId);
+// ─── Enhanced theme preview with timeline ────────────────────────────────
+function ThemeSwatch({ themeId, selected, onSelect, customColors }: { themeId: Theme; selected: boolean; onSelect: () => void; customColors?: Record<string, string> | null }) {
+  const colors = getThemeColors(themeId, customColors);
   const meta = THEME_META[themeId];
   const bg = colors["--color-bg"];
   const surface = colors["--color-surface"];
@@ -36,15 +29,16 @@ function ThemeSwatch({ themeId, selected, onSelect }: { themeId: Theme; selected
   const textPrimary = colors["--color-text-primary"];
   const textMuted = colors["--color-text-muted"];
 
+  // Timeline-specific colors
+  const timelineBg = colors["--color-timeline-bg"] || colors["--color-surface"];
+  const timelineTrackBg = colors["--color-timeline-track-bg"] || colors["--color-bg"];
+  const timelineTrackBorder = colors["--color-timeline-track-border"] || border;
+  const timelineClipVideo = colors["--color-timeline-clip-video"] || accent;
+  const timelineClipAudio = colors["--color-timeline-clip-audio"] || colors["--color-surface-raised"];
+  const timelineRulerBg = colors["--color-timeline-ruler-bg"] || surface;
+
   return (
-    <button
-      onClick={onSelect}
-      className={`relative rounded-xl p-[2px] transition-all duration-200 ${
-        selected
-          ? "ring-2 ring-accent ring-offset-2 ring-offset-bg"
-          : "ring-1 ring-white/[0.06] hover:ring-white/[0.12]"
-      }`}
-    >
+    <button onClick={onSelect} className={`relative rounded-xl p-[2px] transition-all duration-200 ${selected ? "ring-2 ring-accent ring-offset-2 ring-offset-bg" : "ring-1 ring-white/6 hover:ring-white/12"}`}>
       {/* Live mini-preview */}
       <div className="rounded-[10px] overflow-hidden w-full" style={{ background: bg }}>
         {/* Fake topbar */}
@@ -56,22 +50,53 @@ function ThemeSwatch({ themeId, selected, onSelect }: { themeId: Theme; selected
           <div className="w-8 h-[5px] rounded-sm" style={{ background: accent }} />
         </div>
         {/* Fake editor layout */}
-        <div className="flex h-[52px]">
+        <div className="flex h-[38px]">
           {/* Sidebar */}
           <div className="w-[28%] p-1.5 flex flex-col gap-1" style={{ background: surface, borderRight: `1px solid ${border}` }}>
-            <div className="h-[5px] w-[70%] rounded-sm" style={{ background: textMuted, opacity: 0.4 }} />
-            <div className="h-[5px] w-[50%] rounded-sm" style={{ background: textMuted, opacity: 0.3 }} />
-            <div className="h-[5px] w-[60%] rounded-sm" style={{ background: textMuted, opacity: 0.25 }} />
+            <div className="h-[4px] w-[70%] rounded-sm" style={{ background: textMuted, opacity: 0.4 }} />
+            <div className="h-[4px] w-[50%] rounded-sm" style={{ background: textMuted, opacity: 0.3 }} />
+            <div className="h-[4px] w-[60%] rounded-sm" style={{ background: textMuted, opacity: 0.25 }} />
           </div>
           {/* Preview area */}
           <div className="flex-1 flex items-center justify-center">
-            <div className="w-[36px] h-[28px] rounded-[3px]" style={{ background: surfaceRaised, border: `1px solid ${border}` }} />
+            <div className="w-[36px] h-[22px] rounded-[3px]" style={{ background: surfaceRaised, border: `1px solid ${border}` }} />
           </div>
         </div>
-        {/* Fake timeline */}
-        <div className="h-[14px] flex items-center gap-[3px] px-1.5" style={{ background: surface, borderTop: `1px solid ${border}` }}>
-          <div className="h-[6px] flex-1 rounded-sm" style={{ background: accent, opacity: 0.5 }} />
-          <div className="h-[6px] w-[30%] rounded-sm" style={{ background: surfaceRaised }} />
+        {/* Enhanced timeline preview */}
+        <div style={{ background: timelineBg, borderTop: `1px solid ${timelineTrackBorder}` }}>
+          {/* Timeline ruler */}
+          <div className="h-[6px] flex items-center px-1" style={{ background: timelineRulerBg }}>
+            <div className="flex-1 flex gap-[6px]">
+              <div className="w-px h-[3px]" style={{ background: textMuted, opacity: 0.4 }} />
+              <div className="w-px h-[2px]" style={{ background: textMuted, opacity: 0.25 }} />
+              <div className="w-px h-[2px]" style={{ background: textMuted, opacity: 0.25 }} />
+              <div className="w-px h-[3px]" style={{ background: textMuted, opacity: 0.4 }} />
+            </div>
+          </div>
+          {/* Timeline tracks with clips */}
+          <div className="flex">
+            {/* Track labels */}
+            <div className="w-[28%] flex flex-col" style={{ borderRight: `1px solid ${timelineTrackBorder}` }}>
+              <div className="h-[10px] flex items-center px-1" style={{ background: timelineTrackBg, borderBottom: `1px solid ${timelineTrackBorder}` }}>
+                <div className="w-[2px] h-[2px] rounded-full" style={{ background: textMuted, opacity: 0.5 }} />
+              </div>
+              <div className="h-[8px] flex items-center px-1" style={{ background: timelineTrackBg }}>
+                <div className="w-[2px] h-[2px] rounded-full" style={{ background: textMuted, opacity: 0.5 }} />
+              </div>
+            </div>
+            {/* Track content */}
+            <div className="flex-1 flex flex-col">
+              {/* Video track with clip */}
+              <div className="h-[10px] flex items-center gap-[2px] px-1" style={{ background: timelineTrackBg, borderBottom: `1px solid ${timelineTrackBorder}` }}>
+                <div className="h-[6px] w-[45%] rounded-[1px]" style={{ background: timelineClipVideo, opacity: 0.9 }} />
+                <div className="h-[6px] w-[30%] rounded-[1px]" style={{ background: timelineClipVideo, opacity: 0.9 }} />
+              </div>
+              {/* Audio track with clip */}
+              <div className="h-[8px] flex items-center gap-[2px] px-1" style={{ background: timelineTrackBg }}>
+                <div className="h-[4px] w-[55%] rounded-[1px]" style={{ background: timelineClipAudio, opacity: 0.8 }} />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -91,9 +116,190 @@ function ThemeSwatch({ themeId, selected, onSelect }: { themeId: Theme; selected
   );
 }
 
+// ─── Custom Theme Editor ─────────────────────────────────────────────────
+function CustomThemeEditor() {
+  const { customTheme, setCustomTheme, resetCustomTheme } = useSettingsStore();
+  const [baseTheme, setBaseTheme] = useState<Exclude<Theme, "custom">>("dark");
+  const [editingColors, setEditingColors] = useState<Record<string, string>>(customTheme || getBaseThemeForCustomization("dark"));
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Update editing colors when base theme changes
+  const handleBaseThemeChange = (newBaseTheme: Exclude<Theme, "custom">) => {
+    setBaseTheme(newBaseTheme);
+    const baseColors = getBaseThemeForCustomization(newBaseTheme);
+    setEditingColors(baseColors);
+  };
+
+  const colorKeys = getThemeColorKeys();
+  const filteredKeys = searchQuery ? colorKeys.filter((key) => key.toLowerCase().includes(searchQuery.toLowerCase())) : colorKeys;
+
+  // Group colors by category
+  const colorGroups: Record<string, string[]> = {
+    "Base Colors": filteredKeys.filter((k) => k.match(/^--color-(bg|surface|border|text|accent|danger)/)),
+    Timeline: filteredKeys.filter((k) => k.includes("timeline")),
+    Clips: filteredKeys.filter((k) => k.includes("clip") && !k.includes("timeline")),
+    Shadcn: filteredKeys.filter((k) => !k.startsWith("--color-")),
+  };
+
+  const handleColorChange = (key: string, value: string) => {
+    const updated = { ...editingColors, [key]: value };
+    setEditingColors(updated);
+  };
+
+  const handleApply = () => {
+    setCustomTheme(editingColors);
+  };
+
+  const handleReset = () => {
+    resetCustomTheme();
+    setEditingColors(getBaseThemeForCustomization("dark"));
+  };
+
+  const handleCopyFromBase = () => {
+    const baseColors = getBaseThemeForCustomization(baseTheme);
+    setEditingColors(baseColors);
+  };
+
+  const handleExport = () => {
+    const themeData = {
+      name: "Custom Theme",
+      version: "1.0",
+      colors: editingColors,
+      exportedAt: new Date().toISOString(),
+    };
+
+    const json = JSON.stringify(themeData, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `clypra-theme-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        // Validate the theme data
+        if (data.colors && typeof data.colors === "object") {
+          setEditingColors(data.colors);
+        } else {
+          alert("Invalid theme file format");
+        }
+      } catch (error) {
+        alert("Failed to import theme: " + (error as Error).message);
+      }
+    };
+    input.click();
+  };
+
+  const formatColorName = (key: string) => {
+    return key
+      .replace(/^--color-/, "")
+      .replace(/-/g, " ")
+      .replace(/\b\w/g, (l) => l.toUpperCase());
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-3 border-b border-white/6">
+        <h3 className="text-[13px] font-semibold text-text-primary">Custom Theme Editor</h3>
+        {/* Import/Export buttons in header */}
+        <div className="flex items-center gap-2">
+          <button onClick={handleImport} className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-md bg-surface-raised border border-white/6 text-text-muted hover:text-accent hover:border-accent/40 transition-colors" title="Import theme from JSON file">
+            <Upload className="w-3.5 h-3.5" />
+            Import
+          </button>
+          <button onClick={handleExport} className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-md bg-surface-raised border border-white/6 text-text-muted hover:text-accent hover:border-accent/40 transition-colors" title="Export theme to JSON file">
+            <Download className="w-3.5 h-3.5" />
+            Export
+          </button>
+        </div>
+      </div>
+
+      {/* Actions toolbar */}
+      <div className="flex items-center justify-between gap-3">
+        {/* Base theme group */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-medium text-text-muted uppercase tracking-wide">Base:</span>
+          <div className="relative">
+            <select value={baseTheme} onChange={(e) => handleBaseThemeChange(e.target.value as Exclude<Theme, "custom">)} className="appearance-none text-[11px] pl-3 pr-8 py-1.5 rounded-md bg-surface-raised border border-white/6 text-text-primary hover:border-white/12 transition-colors cursor-pointer focus:outline-none focus:border-accent/40">
+              <option value="dark">Dark</option>
+              <option value="midnight">Midnight</option>
+              <option value="ocean">Ocean</option>
+              <option value="forest">Forest</option>
+            </select>
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </div>
+          <button onClick={handleCopyFromBase} className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-md bg-surface-raised border border-white/6 text-text-muted hover:text-text-primary hover:border-white/12 transition-colors" title="Copy all colors from selected base theme">
+            <Copy className="w-3.5 h-3.5" />
+            Copy
+          </button>
+        </div>
+
+        {/* Reset button */}
+        <button onClick={handleReset} className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-md bg-surface-raised border border-white/6 text-text-muted hover:text-danger hover:border-danger/40 transition-colors" title="Reset to default dark theme">
+          <RotateCcw className="w-3.5 h-3.5" />
+          Reset
+        </button>
+      </div>
+
+      {/* Search */}
+      <input type="text" placeholder="Search colors..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full px-3 py-2 text-[12px] rounded-lg bg-surface-raised border border-white/6 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40" />
+
+      {/* Color groups */}
+      <div className="max-h-[400px] overflow-y-auto space-y-4 pr-2 scrollbar-thin">
+        {Object.entries(colorGroups).map(([groupName, keys]) => {
+          if (keys.length === 0) return null;
+          return (
+            <div key={groupName}>
+              <h4 className="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-2">{groupName}</h4>
+              <div className="space-y-2">
+                {keys.map((key) => (
+                  <div key={key} className="flex items-center gap-2">
+                    <input type="color" value={editingColors[key] || "#000000"} onChange={(e) => handleColorChange(key, e.target.value)} className="w-8 h-8 rounded cursor-pointer border border-white/6" />
+                    <div className="flex-1">
+                      <div className="text-[11px] text-text-primary">{formatColorName(key)}</div>
+                      <div className="text-[9px] text-text-muted font-mono">{editingColors[key]}</div>
+                    </div>
+                    <input type="text" value={editingColors[key] || ""} onChange={(e) => handleColorChange(key, e.target.value)} className="w-24 px-2 py-1 text-[10px] font-mono rounded bg-surface-raised border border-white/6 text-text-primary" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Apply button */}
+      <button onClick={handleApply} className="w-full py-2 px-4 text-[12px] font-semibold rounded-lg bg-accent text-white hover:bg-accent-soft transition-colors">
+        Apply Custom Theme
+      </button>
+    </div>
+  );
+}
+
 // ─── Appearance Tab ──────────────────────────────────────────────────────
 function AppearanceTab() {
-  const { theme, fontFamily, setTheme, setFontFamily } = useSettingsStore();
+  const { theme, fontFamily, customTheme, setTheme, setFontFamily } = useSettingsStore();
+  const [showCustomEditor, setShowCustomEditor] = useState(false);
   const themeKeys: Theme[] = ["dark", "midnight", "ocean", "forest"];
   const fontKeys: FontFamily[] = ["inter", "system", "mono", "roboto", "poppins", "outfit"];
 
@@ -101,12 +307,24 @@ function AppearanceTab() {
     <div className="space-y-7">
       {/* Themes */}
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-3">Theme</h3>
-        <div className="grid grid-cols-2 gap-3">
-          {themeKeys.map((t) => (
-            <ThemeSwatch key={t} themeId={t} selected={theme === t} onSelect={() => setTheme(t)} />
-          ))}
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">Theme</h3>
+          <button onClick={() => setShowCustomEditor(!showCustomEditor)} className={`flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${showCustomEditor ? "bg-accent/15 text-accent border border-accent/40" : "bg-surface-raised border border-white/6 text-text-muted hover:text-text-primary"}`}>
+            <Paintbrush className="w-3 h-3" />
+            {showCustomEditor ? "Hide Editor" : "Custom Theme"}
+          </button>
         </div>
+
+        {showCustomEditor ? (
+          <CustomThemeEditor />
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {themeKeys.map((t) => (
+              <ThemeSwatch key={t} themeId={t} selected={theme === t} onSelect={() => setTheme(t)} />
+            ))}
+            {customTheme && <ThemeSwatch key="custom" themeId="custom" selected={theme === "custom"} onSelect={() => setTheme("custom")} customColors={customTheme} />}
+          </div>
+        )}
       </section>
 
       {/* Font Family */}
@@ -117,19 +335,8 @@ function AppearanceTab() {
             const meta = FONT_META[f];
             const isSel = fontFamily === f;
             return (
-              <button
-                key={f}
-                onClick={() => setFontFamily(f)}
-                className={`flex-1 flex flex-col items-center gap-1.5 py-2.5 px-2 rounded-lg border transition-all ${
-                  isSel
-                    ? "border-accent bg-accent/[0.08] text-accent"
-                    : "border-white/[0.06] hover:border-white/[0.12] text-text-muted hover:text-text-primary"
-                }`}
-              >
-                <span
-                  className="text-lg leading-none"
-                  style={{ fontFamily: meta.stack }}
-                >
+              <button key={f} onClick={() => setFontFamily(f)} className={`flex-1 flex flex-col items-center gap-1.5 py-2.5 px-2 rounded-lg border transition-all ${isSel ? "border-accent bg-accent/8 text-accent" : "border-white/6 hover:border-white/12 text-text-muted hover:text-text-primary"}`}>
+                <span className="text-lg leading-none" style={{ fontFamily: meta.stack }}>
                   Aa
                 </span>
                 <span className="text-[10px] font-medium">{meta.name}</span>
@@ -144,10 +351,7 @@ function AppearanceTab() {
 
 // ─── Editor Tab ──────────────────────────────────────────────────────────
 function EditorTab() {
-  const {
-    snapToGrid, autoRipple, autoSave, defaultFrameRate,
-    setSnapToGrid, setAutoRipple, setAutoSave, setDefaultFrameRate,
-  } = useSettingsStore();
+  const { snapToGrid, autoRipple, autoSave, defaultFrameRate, setSnapToGrid, setAutoRipple, setAutoSave, setDefaultFrameRate } = useSettingsStore();
 
   const frameRates: Array<{ value: 24 | 30 | 60; label: string }> = [
     { value: 24, label: "24" },
@@ -176,17 +380,9 @@ function EditorTab() {
             <ToggleSwitch checked={autoSave} onChange={setAutoSave} />
           </SettingRow>
           <SettingRow label="Default frame rate" description="Frame rate for new projects">
-            <div className="flex rounded-lg overflow-hidden border border-white/[0.06]">
+            <div className="flex rounded-lg overflow-hidden border border-white/6">
               {frameRates.map((fr) => (
-                <button
-                  key={fr.value}
-                  onClick={() => setDefaultFrameRate(fr.value)}
-                  className={`px-3 py-1 text-[11px] font-semibold transition-colors ${
-                    defaultFrameRate === fr.value
-                      ? "bg-accent text-white"
-                      : "bg-surface-raised text-text-muted hover:text-text-primary hover:bg-white/[0.06]"
-                  }`}
-                >
+                <button key={fr.value} onClick={() => setDefaultFrameRate(fr.value)} className={`px-3 py-1 text-[11px] font-semibold transition-colors ${defaultFrameRate === fr.value ? "bg-accent text-white" : "bg-surface-raised text-text-muted hover:text-text-primary hover:bg-white/6"}`}>
                   {fr.label}
                 </button>
               ))}
@@ -213,21 +409,8 @@ function SettingRow({ label, description, children }: { label: string; descripti
 
 function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onChange?: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange?.(!checked)}
-      className={`w-9 h-5 rounded-full relative shrink-0 transition-colors ${
-        disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"
-      } ${checked ? "bg-accent" : "bg-white/[0.1]"}`}
-    >
-      <div
-        className={`absolute top-[3px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform ${
-          checked ? "left-[18px]" : "left-[3px]"
-        }`}
-      />
+    <button type="button" role="switch" aria-checked={checked} disabled={disabled} onClick={() => onChange?.(!checked)} className={`w-9 h-5 rounded-full relative shrink-0 transition-colors ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"} ${checked ? "bg-accent" : "bg-white/1"}`}>
+      <div className={`absolute top-[3px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform ${checked ? "left-[18px]" : "left-[3px]"}`} />
     </button>
   );
 }
@@ -256,22 +439,13 @@ function AboutTab() {
         <h3 className="text-lg font-bold text-text-primary">Clypra</h3>
         <p className="text-xs text-text-muted mt-1">Version 0.1.0 (dev)</p>
       </div>
-      <p className="text-xs text-text-muted max-w-[280px] leading-relaxed">
-        A modern, native video editor built with Tauri, React, and FFmpeg.
-        Designed for speed and creative freedom.
-      </p>
+      <p className="text-xs text-text-muted max-w-[280px] leading-relaxed">A modern, native video editor built with Tauri, React, and FFmpeg. Designed for speed and creative freedom.</p>
       <div className="flex items-center gap-4 mt-2">
-        <button 
-          onClick={() => openUrl("https://github.com/AIEraDev/clypra")}
-          className="text-xs font-medium text-text-muted hover:text-accent transition-colors flex items-center gap-1.5"
-        >
+        <button onClick={() => openUrl("https://github.com/AIEraDev/clypra")} className="text-xs font-medium text-text-muted hover:text-accent transition-colors flex items-center gap-1.5">
           <GithubIcon className="w-3.5 h-3.5" />
           GitHub
         </button>
-        <button 
-          onClick={() => openUrl("https://x.com/AIEraDev")}
-          className="text-xs font-medium text-text-muted hover:text-accent transition-colors flex items-center gap-1.5"
-        >
+        <button onClick={() => openUrl("https://x.com/AIEraDev")} className="text-xs font-medium text-text-muted hover:text-accent transition-colors flex items-center gap-1.5">
           <XIcon className="w-3.5 h-3.5" />
           @AIEraDev
         </button>
@@ -296,20 +470,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     <Modal isOpen={isOpen} onClose={onClose} title="Settings" size="lg">
       <div className="flex min-h-[420px]">
         {/* Sidebar */}
-        <div className="w-[160px] shrink-0 border-r border-white/[0.06] p-2 flex flex-col gap-0.5">
+        <div className="w-[160px] shrink-0 border-r border-white/6 p-2 flex flex-col gap-0.5">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors ${
-                  isActive
-                    ? "bg-accent/[0.1] text-accent"
-                    : "text-text-muted hover:text-text-primary hover:bg-white/[0.04]"
-                }`}
-              >
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors ${isActive ? "bg-accent/1 text-accent" : "text-text-muted hover:text-text-primary hover:bg-white/4"}`}>
                 <Icon className="w-4 h-4 shrink-0" />
                 {tab.label}
               </button>
