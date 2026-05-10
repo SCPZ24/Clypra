@@ -5,6 +5,7 @@ import { Timeline } from "../Timeline";
 import { useTimelineStore } from "../../../../store/timelineStore";
 import { useProjectStore } from "../../../../store/projectStore";
 import { useUIStore } from "../../../../store/uiStore";
+import { useRenderEngineStore } from "../../../../store/renderEngineStore";
 
 const seekMock = vi.fn();
 const setDurationMock = vi.fn();
@@ -87,6 +88,7 @@ describe("Timeline click behavior", () => {
       pixelsPerSecond: 100,
     });
     useProjectStore.setState({ project: null, mediaAssets: [], recentProjects: [] });
+    useRenderEngineStore.setState({ runtime: null });
   });
 
   it("seeks when clicking empty timeline area", () => {
@@ -150,6 +152,7 @@ describe("Timeline drag interactions", () => {
       ],
       recentProjects: [],
     });
+    useRenderEngineStore.setState({ runtime: null });
   });
 
   const setupRects = (container: HTMLElement) => {
@@ -330,6 +333,7 @@ describe("Timeline wheel zoom", () => {
       rippleEditEnabled: false,
     });
     useProjectStore.setState({ project: null, mediaAssets: [], recentProjects: [] });
+    useRenderEngineStore.setState({ runtime: null });
   });
 
   afterEach(() => {
@@ -379,11 +383,27 @@ describe("Timeline wheel zoom", () => {
 
     const afterPps = useTimelineStore.getState().pixelsPerSecond;
     expect(afterPps).toBeGreaterThan(beforePps);
-    expect(afterPps).toBeLessThanOrEqual(500);
+    expect(afterPps).toBeLessThanOrEqual(400);
 
     // Anchor time was (200 + 400) / 100 = 6s; scroll should move to keep ~that time under x=400
     expect(scroller.scrollLeft).toBeGreaterThan(200);
     expect(useTimelineStore.getState().scrollLeft).toBe(scroller.scrollLeft);
+  });
+
+  it("notifies render runtime with normalized zoom scale", async () => {
+    const runtime = {
+      attach: vi.fn(() => vi.fn()),
+      notifyZoom: vi.fn(),
+    };
+    useRenderEngineStore.setState({ runtime: runtime as any });
+    useTimelineStore.setState({ pixelsPerSecond: 250, zoomLevel: 2.5 });
+
+    render(<Timeline />);
+
+    await act(async () => {});
+
+    expect(runtime.notifyZoom).toHaveBeenCalledWith(2.5);
+    expect(runtime.notifyZoom).not.toHaveBeenCalledWith(250);
   });
 
   it("plain wheel without Ctrl does not change pixelsPerSecond", async () => {

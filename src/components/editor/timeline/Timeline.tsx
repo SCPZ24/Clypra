@@ -16,9 +16,8 @@ import { usePlayback } from "../../../hooks/usePlayback";
 import type { VideoMetadata } from "../../../types";
 import { createClipFromAsset } from "../../../lib/timelineClip";
 import { useRenderEngineStore } from "../../../store/renderEngineStore";
+import { TIMELINE_MAX_PPS, TIMELINE_MIN_PPS } from "../../../lib/timelineZoom";
 
-const TIMELINE_MIN_PPS = 50;
-const TIMELINE_MAX_PPS = 500;
 /** Multiplier on normalized wheel delta (pixels); higher = stronger zoom per tick. */
 const WHEEL_ZOOM_SENSITIVITY = 0.006;
 /** Extra multiplier for Ctrl/⌘ + wheel zoom feel (higher = faster). */
@@ -105,10 +104,10 @@ export const Timeline: React.FC = () => {
     return runtime.attach(container);
   }, [runtime]); // re-attach if runtime changes (e.g. project switch)
 
-  // Notify runtime when zoom level (pixelsPerSecond) changes
+  // Notify runtime when zoom scale changes. Layout uses px/s; SRP uses zoomLevel.
   useEffect(() => {
     if (!runtime) return;
-    runtime.notifyZoom(pixelsPerSecond);
+    runtime.notifyZoom(pixelsPerSecond / 100);
   }, [runtime, pixelsPerSecond]);
 
   // Pointer-based drag state with gap engine
@@ -163,13 +162,6 @@ export const Timeline: React.FC = () => {
           index: draggedTrackClips.findIndex((c) => c.id === dragged.id),
         };
       }
-
-      console.log("[TIMELINE] 🚀 Clip drag start", {
-        clipId,
-        originalIndex,
-        trackId: clip.trackId,
-        draggedClipIds,
-      });
 
       // Pack other clips to t=0.. — then move dragged clip to tail so it never shares startTime with siblings (avoids overlap in store).
       const pps = useTimelineStore.getState().pixelsPerSecond;
@@ -315,13 +307,6 @@ export const Timeline: React.FC = () => {
       }
     }
 
-    console.log("[TIMELINE] 📍 Gap engine", {
-      targetTrackId,
-      insertionIndex,
-      gapStartTime,
-      clipDuration: clip.duration,
-    });
-
     const next = {
       ...ds,
       offsetX,
@@ -343,13 +328,6 @@ export const Timeline: React.FC = () => {
       const dragSnapshot = dragStateRef.current;
       if (!dragSnapshot) return;
 
-      console.log("[TIMELINE] 🏁 Clip drag end", {
-        clipId,
-        insertionIndex: dragSnapshot.insertionIndex,
-        targetTrackId: dragSnapshot.targetTrackId,
-        willCreateNewTrack: dragSnapshot.willCreateNewTrack,
-        newTrackPosition: dragSnapshot.newTrackPosition,
-      });
       const sourceTrackIds = Array.from(new Set(Object.values(dragSnapshot.originalPlacements).map((p) => p.trackId)));
       const restoreDraggedToOriginal = () => {
         const affectedTracks = new Set<string>();
@@ -380,11 +358,6 @@ export const Timeline: React.FC = () => {
         const wouldEmptyMain = movingAwayFromMain && mainClipIds.length > 0 && draggedMainClipCount === mainClipIds.length;
 
         if (wouldEmptyMain) {
-          console.log("[TIMELINE] 🚫 Drop rejected: main track must keep at least one clip", {
-            mainTrackId,
-            mainClipIds,
-            draggedClipIds: dragSnapshot.draggedClipIds,
-          });
           restoreDraggedToOriginal();
           dragStateRef.current = null;
           setDragState(null);
@@ -462,8 +435,6 @@ export const Timeline: React.FC = () => {
       const ds = dragStateRef.current;
       if (!ds) return;
 
-      console.log("[TIMELINE] ⚠️ Drag cancelled with ESC", { clipId: ds.draggingClipId });
-
       const affectedTracks = new Set<string>();
       ds.draggedClipIds.forEach((id) => {
         const placement = ds.originalPlacements[id];
@@ -509,12 +480,9 @@ export const Timeline: React.FC = () => {
         const wouldEmptyMain = mainClipIds.length > 0 && deletingFromMain.length === mainClipIds.length;
 
         if (wouldEmptyMain) {
-          console.log("[TIMELINE] 🚫 Cannot delete all clips from main track");
           return;
         }
       }
-
-      console.log("[TIMELINE] 🗑️ Deleting clips", { selectedClipIds });
 
       // Remove each selected clip
       const { removeClip, normalizeTrack } = useTimelineStore.getState();
@@ -694,25 +662,6 @@ export const Timeline: React.FC = () => {
     const epsilon = 2; // px
     if (maxScrollLeft - newScrollLeft < epsilon) {
       newScrollLeft = maxScrollLeft;
-    }
-
-    // 🔍 Debug logging - ENABLED to diagnose remaining gap
-    if (currentTime > duration - 2) {
-      console.log("[Timeline Scroll Debug]", {
-        currentTime: currentTime.toFixed(2),
-        duration: duration.toFixed(2),
-        isAtAbsoluteEnd,
-        playheadX,
-        scrollLeft: container.scrollLeft,
-        newScrollLeft,
-        viewportWidth,
-        contentWidthActual,
-        contentWidthComputed: contentWidth,
-        maxScrollLeft,
-        gap: maxScrollLeft - newScrollLeft,
-        pixelsPerSecond,
-        isPlaying,
-      });
     }
 
     // ✅ 9. Apply scroll if changed (avoid unnecessary updates)

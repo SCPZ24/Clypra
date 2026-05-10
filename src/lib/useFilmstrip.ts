@@ -137,9 +137,9 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
       });
     };
 
-    // Progressive tier sequence respects current zoom level for priority rendering.
-    // When zoomed in, start at the appropriate spatial tier to avoid unnecessary low‑tier flicker.
-    const startTier = spatialTier;
+    // Progressive tier sequence: always start at L0 for fast-paint, then
+    // converge to the SRP-committed tier for the current zoom level.
+    const startTier = SpatialTier.L0;
     const targetTier = spatialTier;
 
     cancelRef.current = requestProgressiveTiers({

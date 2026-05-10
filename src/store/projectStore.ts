@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Project, MediaAsset } from "../types";
 import { useSettingsStore } from "./settingsStore";
+import { TIMELINE_PPS_PER_ZOOM, TIMELINE_ZOOM_DEFAULT } from "../lib/timelineZoom";
 
 interface ProjectStore {
   project: Project | null;
@@ -31,6 +32,14 @@ const getAspectRatioDimensions = (ratio: string): { width: number; height: numbe
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const AUTO_SAVE_DELAY = 500; // ms
 
+const DEFAULT_TIMELINE_VIEW = {
+  tracks: [],
+  clips: [],
+  scrollLeft: 0,
+  zoomLevel: TIMELINE_ZOOM_DEFAULT,
+  pixelsPerSecond: TIMELINE_ZOOM_DEFAULT * TIMELINE_PPS_PER_ZOOM,
+};
+
 export const useProjectStore = create<ProjectStore>((set, get) => ({
   project: null,
   mediaAssets: [],
@@ -53,7 +62,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
     // Clear timeline state for new project
     import("./timelineStore").then(({ useTimelineStore }) => {
-      useTimelineStore.setState({ tracks: [], clips: [] });
+      useTimelineStore.setState(DEFAULT_TIMELINE_VIEW);
     });
 
     get().scheduleAutoSave();
@@ -65,7 +74,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
     // Clear timeline state
     import("./timelineStore").then(({ useTimelineStore }) => {
-      useTimelineStore.setState({ tracks: [], clips: [] });
+      useTimelineStore.setState(DEFAULT_TIMELINE_VIEW);
     });
   },
 
@@ -75,7 +84,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       const existingAsset = state.mediaAssets.find((a) => a.path === asset.path);
 
       if (existingAsset) {
-        console.log(`[ProjectStore] Duplicate asset detected, skipping: ${asset.path}`);
         return state; // No change
       }
 
@@ -125,7 +133,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         set({ project: null, mediaAssets: [] });
       }
 
-      console.log("[DeleteProject] Project deleted:", projectId);
     } catch (error) {
       console.error("[DeleteProject] Failed to delete project:", error);
       throw error;
@@ -167,7 +174,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
               projectData: JSON.stringify(projectData),
             });
 
-            console.log("[CloseProject] Final save completed:", project.name);
           } catch (error) {
             console.error("[CloseProject] Failed to save project:", error);
           }
@@ -218,7 +224,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           projectData: JSON.stringify(projectData),
         });
 
-        console.log("[AutoSave] Project saved:", project.name);
       } catch (error) {
         console.error("[AutoSave] Failed to save project:", error);
       }

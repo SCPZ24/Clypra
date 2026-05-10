@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Track, Clip } from "../types";
 import { useUIStore } from "./uiStore";
 import { useProjectStore } from "./projectStore";
+import { clampTimelinePixelsPerSecond, clampTimelineZoom, TIMELINE_PPS_PER_ZOOM, TIMELINE_ZOOM_DEFAULT } from "../lib/timelineZoom";
 
 interface TimelineStore {
   tracks: Track[];
@@ -24,7 +25,7 @@ interface TimelineStore {
   updateClip: (clipId: string, updates: Partial<Clip>) => void;
   moveClip: (clipId: string, startTime: number) => void;
   setZoom: (level: number) => void;
-  /** Clamps to 50–500 px/s and syncs `zoomLevel` to `pixelsPerSecond / 100`. */
+  /** Clamps to the SRP zoom range and syncs `zoomLevel` to `pixelsPerSecond / 100`. */
   setPixelsPerSecond: (pps: number) => void;
   setScrollLeft: (left: number) => void;
   splitClipAtTime: (clipId: string, time: number) => void;
@@ -61,9 +62,9 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
   tracks: [],
   clips: [],
   mainVideoTrackId: null,
-  zoomLevel: 1.0,
+  zoomLevel: TIMELINE_ZOOM_DEFAULT,
   scrollLeft: 0,
-  pixelsPerSecond: 100,
+  pixelsPerSecond: TIMELINE_ZOOM_DEFAULT * TIMELINE_PPS_PER_ZOOM,
   rippleEditEnabled: false,
 
   addTrack: (type) => {
@@ -182,16 +183,15 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
   },
 
   setPixelsPerSecond: (pps) => {
-    const clamped = Math.max(50, Math.min(pps, 500));
+    const clamped = clampTimelinePixelsPerSecond(pps);
     set({
       pixelsPerSecond: clamped,
-      zoomLevel: clamped / 100,
+      zoomLevel: clamped / TIMELINE_PPS_PER_ZOOM,
     });
   },
 
   setZoom: (level) => {
-    const clampedLevel = Math.max(0.5, Math.min(level, 5));
-    get().setPixelsPerSecond(100 * clampedLevel);
+    get().setPixelsPerSecond(TIMELINE_PPS_PER_ZOOM * clampTimelineZoom(level));
   },
 
   setScrollLeft: (left) => {

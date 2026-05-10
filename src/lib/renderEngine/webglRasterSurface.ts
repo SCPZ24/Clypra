@@ -23,10 +23,10 @@ import type { TransportArtifact } from "./transport";
 const VERT_SRC = /* glsl */ `#version 300 es
 precision mediump float;
 
-// Per-tile: position rect [x, y, w, h] in clip-space and UV rect [u, v, uw, uh] in atlas space
+// Per-vertex payload repeats per tile: position rect [x, y, w, h] in clip-space
+// and UV rect [u, v, uw, uh] in atlas space.
 in vec4 a_posRect;   // x, y, w, h  (clip-space, -1..1)
 in vec4 a_uvRect;    // u, v, uw, uh (0..1 in atlas)
-in float a_tileIdx;  // which tile (for vertex expansion)
 
 out vec2 v_uv;
 
@@ -116,7 +116,6 @@ export class WebGLRasterSurface {
   // Attribute locations
   private _aPosRect: number;
   private _aUvRect: number;
-  private _aTileIdx: number;
 
   constructor(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext) {
     this._canvas = canvas;
@@ -125,7 +124,10 @@ export class WebGLRasterSurface {
     this._program = this._compileProgram();
     this._aPosRect = gl.getAttribLocation(this._program, "a_posRect");
     this._aUvRect = gl.getAttribLocation(this._program, "a_uvRect");
-    this._aTileIdx = gl.getAttribLocation(this._program, "a_tileIdx");
+
+    if (this._aPosRect < 0 || this._aUvRect < 0) {
+      throw new Error("[WebGLRasterSurface] Required shader attributes were optimized out");
+    }
 
     this._vao = gl.createVertexArray()!;
     this._vbo = gl.createBuffer()!;
@@ -208,8 +210,9 @@ export class WebGLRasterSurface {
     }
 
     // ── Build per-tile geometry ─────────────────────────────────────────────
-    // 6 vertices per tile, each vertex: [posRect(4), uvRect(4), tileIdx(1)] = 9 floats
-    const FLOATS_PER_VERTEX = 9;
+    // 6 vertices per tile, each vertex: [posRect(4), uvRect(4)] = 8 floats.
+    // gl_VertexID expands the repeated rect payload into the quad corners.
+    const FLOATS_PER_VERTEX = 8;
     const VERTS_PER_TILE = 6;
     const buf = new Float32Array(tileCount * VERTS_PER_TILE * FLOATS_PER_VERTEX);
 
@@ -251,7 +254,6 @@ export class WebGLRasterSurface {
         buf[off + 5] = v0;
         buf[off + 6] = uw;
         buf[off + 7] = vh;
-        buf[off + 8] = i;
       }
     }
 
@@ -266,8 +268,6 @@ export class WebGLRasterSurface {
     gl.vertexAttribPointer(this._aPosRect, 4, gl.FLOAT, false, stride, 0);
     gl.enableVertexAttribArray(this._aUvRect);
     gl.vertexAttribPointer(this._aUvRect, 4, gl.FLOAT, false, stride, 4 * 4);
-    gl.enableVertexAttribArray(this._aTileIdx);
-    gl.vertexAttribPointer(this._aTileIdx, 1, gl.FLOAT, false, stride, 8 * 4);
 
     gl.uniform1i(gl.getUniformLocation(this._program, "u_atlas"), 0);
     gl.activeTexture(gl.TEXTURE0);

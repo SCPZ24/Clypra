@@ -4,7 +4,9 @@ import { EditorScreen } from "./components/screens/EditorScreen";
 import { TooltipProvider } from "./components/ui/Tooltip";
 import { useProjectStore } from "./store/projectStore";
 import { useUIStore } from "./store/uiStore";
-import type { Project, AspectRatio } from "./types";
+import type { Project, AspectRatio, MediaAsset } from "./types";
+
+const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
 
 const App = () => {
   const { project, createProject, loadProject, setRecentProjects } = useProjectStore();
@@ -13,12 +15,26 @@ const App = () => {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
+        const { convertFileSrc, invoke } = await import("@tauri-apps/api/core");
         const projectsJson: string[] = await invoke("get_recent_projects");
 
         // Convert snake_case from Rust to camelCase for frontend
         const projects = projectsJson.map((json) => {
           const rustProject = JSON.parse(json);
+          const mediaAssets: MediaAsset[] = Array.isArray(rustProject.media_assets)
+            ? rustProject.media_assets.map((asset: MediaAsset) => ({
+                ...asset,
+                posterFrame: asset.posterFrame && !isExternalOrDataUrl(asset.posterFrame)
+                  ? convertFileSrc(asset.posterFrame)
+                  : asset.posterFrame,
+                coverArt: asset.coverArt && !isExternalOrDataUrl(asset.coverArt)
+                  ? convertFileSrc(asset.coverArt)
+                  : asset.coverArt,
+                path: asset.path && asset.type === "image" && !isExternalOrDataUrl(asset.path)
+                  ? convertFileSrc(asset.path)
+                  : asset.path,
+              }))
+            : [];
           return {
             id: rustProject.id,
             name: rustProject.name,
@@ -29,6 +45,7 @@ const App = () => {
             canvasHeight: rustProject.canvas_height,
             frameRate: rustProject.frame_rate,
             duration: rustProject.duration || 0,
+            mediaAssets,
           };
         });
 
@@ -51,8 +68,6 @@ const App = () => {
 
   const handleOpenProject = async (proj: Project) => {
     try {
-      console.log("[OpenProject] Starting to open project:", proj.id);
-
       // Reset UI state from any previous session
       useUIStore.getState().exitSourceMode();
 
@@ -65,14 +80,10 @@ const App = () => {
       const projectsDir = await join(appData, "projects");
       const projectPath = await join(projectsDir, `${proj.id}.json`);
 
-      console.log("[OpenProject] Loading from path:", projectPath);
-
       // Load the full project JSON
       const projectJson: string = await invoke("load_project", { path: projectPath });
-      console.log("[OpenProject] Loaded JSON, length:", projectJson.length);
 
       const fullProjectData = JSON.parse(projectJson);
-      console.log("[OpenProject] Parsed project data:", fullProjectData);
 
       // Convert snake_case to camelCase for project
       const project: Project = {
@@ -87,15 +98,11 @@ const App = () => {
         duration: fullProjectData.duration || 0,
       };
 
-      console.log("[OpenProject] Converted project:", project);
-
       // Load project
       loadProject(project);
 
       // Restore media assets directly
       if (fullProjectData.media_assets && Array.isArray(fullProjectData.media_assets)) {
-        console.log("[OpenProject] Restoring media assets:", fullProjectData.media_assets.length);
-
         // Convert posterFrame paths using convertFileSrc
         const { convertFileSrc } = await import("@tauri-apps/api/core");
         const convertedAssets = fullProjectData.media_assets.map((asset: any) => {
@@ -116,15 +123,11 @@ const App = () => {
       // Restore tracks and clips directly
       const { useTimelineStore } = await import("./store/timelineStore");
       if (fullProjectData.tracks && Array.isArray(fullProjectData.tracks)) {
-        console.log("[OpenProject] Restoring tracks:", fullProjectData.tracks.length);
         useTimelineStore.setState({ tracks: fullProjectData.tracks });
       }
       if (fullProjectData.clips && Array.isArray(fullProjectData.clips)) {
-        console.log("[OpenProject] Restoring clips:", fullProjectData.clips.length);
         useTimelineStore.setState({ clips: fullProjectData.clips });
       }
-
-      console.log("[OpenProject] Successfully loaded project:", project.name);
     } catch (error) {
       console.error("[OpenProject] Failed to open project:", error);
       alert(`Failed to open project: ${error}`);

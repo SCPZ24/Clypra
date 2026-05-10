@@ -67,7 +67,7 @@ pub fn get_recent_projects(app: tauri::AppHandle) -> Result<Vec<String>, String>
     
     projects.sort_by(|a, b| b.0.cmp(&a.0));
     
-    Ok(projects.into_iter().take(6).map(|(_, content)| content).collect())
+    Ok(projects.into_iter().map(|(_, content)| content).collect())
 }
 
 #[tauri::command]

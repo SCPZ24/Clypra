@@ -16,7 +16,7 @@ interface TimelineRulerProps {
  *   4. Ticks hang from the top of the ruler
  *   5. Smooth zoom transitions via a "nice number" interval table
  *
- * Zoom range: 50–500 px/s
+ * Zoom range follows SRP: 25–400 px/s
  */
 
 // ── Interval table ──────────────────────────────────────────────────────

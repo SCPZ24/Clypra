@@ -80,8 +80,13 @@ export class RenderRuntime {
       this._scheduler.resetIdleTimer();
     }
 
-    // Recompute SRP → hysteresis → update all clip states
+    // Recompute SRP → hysteresis → update all clip states.
+    // If no clips are registered yet, seed hysteresis from the current zoom so
+    // the first clip added to the timeline starts at the correct target tier.
     const srpResult = computeSpatialTier(this._currentZoom, window.devicePixelRatio, this._qualityPreset);
+    if (this._clipStates.size === 0) {
+      this._hysteresis.reset(srpResult.spatialTier);
+    }
     const committedTier = this._hysteresis.update(this._currentZoom, srpResult.spatialTier);
 
     if (committedTier !== null || update.epochTrigger) {

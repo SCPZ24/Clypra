@@ -30,6 +30,17 @@ describe("timelineStore track controls", () => {
     });
   });
 
+  it("defaults initial timeline zoom to 50%", () => {
+    useTimelineStore.setState({
+      tracks: [],
+      clips: [],
+      scrollLeft: 0,
+    });
+
+    expect(useTimelineStore.getInitialState().zoomLevel).toBe(0.5);
+    expect(useTimelineStore.getInitialState().pixelsPerSecond).toBe(50);
+  });
+
   it("creates tracks with visible=true, muted=false, locked=false defaults", () => {
     useTimelineStore.getState().addTrack("video");
     const track = useTimelineStore.getState().tracks[0];
@@ -142,14 +153,14 @@ describe("timelineStore track controls", () => {
     expect(useTimelineStore.getState().getTimelineEndTime()).toBe(16);
   });
 
-  it("setPixelsPerSecond clamps to 50–500 and sets zoomLevel to pps / 100", () => {
+  it("setPixelsPerSecond clamps to the SRP range 25–400 and sets zoomLevel to pps / 100", () => {
     useTimelineStore.getState().setPixelsPerSecond(999);
-    expect(useTimelineStore.getState().pixelsPerSecond).toBe(500);
-    expect(useTimelineStore.getState().zoomLevel).toBe(5);
+    expect(useTimelineStore.getState().pixelsPerSecond).toBe(400);
+    expect(useTimelineStore.getState().zoomLevel).toBe(4);
 
     useTimelineStore.getState().setPixelsPerSecond(10);
-    expect(useTimelineStore.getState().pixelsPerSecond).toBe(50);
-    expect(useTimelineStore.getState().zoomLevel).toBe(0.5);
+    expect(useTimelineStore.getState().pixelsPerSecond).toBe(25);
+    expect(useTimelineStore.getState().zoomLevel).toBe(0.25);
 
     useTimelineStore.getState().setPixelsPerSecond(175);
     expect(useTimelineStore.getState().pixelsPerSecond).toBe(175);
@@ -157,9 +168,13 @@ describe("timelineStore track controls", () => {
   });
 
   it("setZoom uses the same bounds via setPixelsPerSecond", () => {
-    useTimelineStore.getState().setZoom(10);
-    expect(useTimelineStore.getState().pixelsPerSecond).toBe(500);
-    expect(useTimelineStore.getState().zoomLevel).toBe(5);
+    useTimelineStore.getState().setZoom(5);
+    expect(useTimelineStore.getState().pixelsPerSecond).toBe(400);
+    expect(useTimelineStore.getState().zoomLevel).toBe(4);
+
+    useTimelineStore.getState().setZoom(0.1);
+    expect(useTimelineStore.getState().pixelsPerSecond).toBe(25);
+    expect(useTimelineStore.getState().zoomLevel).toBe(0.25);
   });
 
   it("sets mainVideoTrackId to the first created video track", () => {

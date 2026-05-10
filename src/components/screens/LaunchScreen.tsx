@@ -1,15 +1,32 @@
 import React, { useEffect, useState } from "react";
-import { Film, Plus, Trash2, Clock, ChevronRight, Sparkles } from "lucide-react";
+import { Film, Image as ImageIcon, Plus, Trash2, Clock, ChevronRight, Sparkles } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
 import { useProjectStore } from "../../store/projectStore";
 import { useSettingsStore } from "../../store/settingsStore";
-import type { AspectRatio, Project } from "../../types";
+import type { AspectRatio, MediaAsset, Project } from "../../types";
 
 interface LaunchScreenProps {
   onProjectCreate: (name: string, aspectRatio: AspectRatio, frameRate: 24 | 30 | 60) => void;
   onProjectOpen: (project: Project) => void;
 }
+
+const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
+
+const toPreviewSrc = (value?: string) => {
+  if (!value) return undefined;
+  return value;
+};
+
+const getProjectThumbnail = (project: Project) => {
+  const mediaAssets = project.mediaAssets ?? [];
+  const firstVisualAsset = mediaAssets.find((asset) => asset.type === "video" || asset.type === "image") ?? mediaAssets[0];
+  if (!firstVisualAsset) return undefined;
+  if (firstVisualAsset.posterFrame) return toPreviewSrc(firstVisualAsset.posterFrame);
+  if (firstVisualAsset.coverArt) return toPreviewSrc(firstVisualAsset.coverArt);
+  if (firstVisualAsset.type === "image") return toPreviewSrc(firstVisualAsset.path);
+  return undefined;
+};
 
 export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onProjectOpen }) => {
   const { recentProjects, setRecentProjects, deleteProject } = useProjectStore();
@@ -19,12 +36,26 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
   useEffect(() => {
     const loadRecentProjects = async () => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
+        const { convertFileSrc, invoke } = await import("@tauri-apps/api/core");
         const projectsJson: string[] = await invoke("get_recent_projects");
 
         // Convert snake_case from Rust to camelCase for frontend
         const projects = projectsJson.map((json) => {
           const rustProject = JSON.parse(json);
+          const mediaAssets: MediaAsset[] = Array.isArray(rustProject.media_assets)
+            ? rustProject.media_assets.map((asset: MediaAsset) => ({
+                ...asset,
+                posterFrame: asset.posterFrame && !isExternalOrDataUrl(asset.posterFrame)
+                  ? convertFileSrc(asset.posterFrame)
+                  : asset.posterFrame,
+                coverArt: asset.coverArt && !isExternalOrDataUrl(asset.coverArt)
+                  ? convertFileSrc(asset.coverArt)
+                  : asset.coverArt,
+                path: asset.path && asset.type === "image" && !isExternalOrDataUrl(asset.path)
+                  ? convertFileSrc(asset.path)
+                  : asset.path,
+              }))
+            : [];
           return {
             id: rustProject.id,
             name: rustProject.name,
@@ -35,6 +66,7 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
             canvasHeight: rustProject.canvas_height,
             frameRate: rustProject.frame_rate,
             duration: rustProject.duration || 0,
+            mediaAssets,
           };
         });
 
@@ -165,45 +197,58 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
               <p className="text-xs text-text-muted/60 mt-1">Create a new project to get started</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {recentProjects.slice(0, 9).map((project) => (
-                <button
-                  key={project.id}
-                  onClick={() => onProjectOpen(project)}
-                  className="group relative text-left rounded-xl border border-white/[0.04] bg-surface hover:bg-surface-raised transition-all duration-200 hover:-translate-y-0.5 hover:border-white/[0.08] hover:shadow-lg hover:shadow-black/20 overflow-hidden"
-                >
-                  {/* Thumbnail area */}
-                  <div className="h-[88px] bg-bg flex items-center justify-center relative overflow-hidden">
-                    {/* Accent glow on hover */}
-                    <div className="absolute inset-0 bg-accent/[0.03] opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <Film className="w-7 h-7 text-text-muted/25 group-hover:text-accent/40 transition-colors" />
-                    {/* Aspect ratio badge */}
-                    <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-white/[0.06] text-text-muted border border-white/[0.04]">
-                      {project.aspectRatio}
-                    </span>
-                  </div>
-
-                  {/* Info */}
-                  <div className="px-3.5 py-3">
-                    <h4 className="text-[13px] font-semibold text-text-primary truncate group-hover:text-accent-soft transition-colors">
-                      {project.name}
-                    </h4>
-                    <div className="flex items-center justify-between mt-1.5">
-                      <span className="text-[11px] text-text-muted">{formatDate(project.createdAt)}</span>
-                      <ChevronRight className="w-3.5 h-3.5 text-text-muted/30 group-hover:text-accent/60 transition-colors" />
-                    </div>
-                  </div>
-
-                  {/* Delete button */}
-                  <div
-                    onClick={(e) => handleDeleteClick(e, project)}
-                    className="absolute top-2 left-2 p-1.5 rounded-lg bg-bg/80 backdrop-blur-sm border border-white/[0.04] opacity-0 group-hover:opacity-100 transition-opacity hover:bg-danger/20 hover:border-danger/30 cursor-pointer"
-                    title="Delete project"
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {recentProjects.map((project) => {
+                const thumbnail = getProjectThumbnail(project);
+                return (
+                  <button
+                    key={project.id}
+                    onClick={() => onProjectOpen(project)}
+                    className="group relative text-left rounded-xl border border-white/[0.04] bg-surface hover:bg-surface-raised transition-all duration-200 hover:-translate-y-0.5 hover:border-white/[0.08] hover:shadow-lg hover:shadow-black/20 overflow-hidden"
                   >
-                    <Trash2 className="w-3.5 h-3.5 text-text-muted hover:text-danger transition-colors" />
-                  </div>
-                </button>
-              ))}
+                    {/* Thumbnail area */}
+                    <div className="h-[170px] bg-bg flex items-center justify-center relative overflow-hidden">
+                      {thumbnail ? (
+                        <>
+                          <img src={thumbnail} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover opacity-25 blur-xl transition-transform duration-300 group-hover:scale-[1.14]" draggable={false} />
+                          <div className="absolute inset-3 flex items-center justify-center overflow-hidden rounded-lg">
+                            <img src={thumbnail} alt="" className="max-h-full max-w-full object-contain opacity-95 shadow-[0_12px_28px_rgba(0,0,0,0.28)] transition-transform duration-300 group-hover:scale-[1.02]" draggable={false} />
+                          </div>
+                        </>
+                      ) : (
+                        <ImageIcon className="w-7 h-7 text-text-muted/25 group-hover:text-accent/40 transition-colors" />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-bg/55 via-transparent to-bg/10" />
+                      {/* Accent glow on hover */}
+                      <div className="absolute inset-0 bg-accent/[0.03] opacity-0 group-hover:opacity-100 transition-opacity" />
+                      {/* Aspect ratio badge */}
+                      <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-bg/75 backdrop-blur-sm text-text-muted border border-white/[0.06]">
+                        {project.aspectRatio}
+                      </span>
+                    </div>
+
+                    {/* Info */}
+                    <div className="px-3.5 py-4">
+                      <h4 className="text-sm font-semibold text-text-primary truncate group-hover:text-accent-soft transition-colors">
+                        {project.name}
+                      </h4>
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-xs text-text-muted">{formatDate(project.createdAt)}</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-text-muted/30 group-hover:text-accent/60 transition-colors" />
+                      </div>
+                    </div>
+
+                    {/* Delete button */}
+                    <div
+                      onClick={(e) => handleDeleteClick(e, project)}
+                      className="absolute top-2 left-2 p-1.5 rounded-lg bg-bg/80 backdrop-blur-sm border border-white/[0.04] opacity-0 group-hover:opacity-100 transition-opacity hover:bg-danger/20 hover:border-danger/30 cursor-pointer"
+                      title="Delete project"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-text-muted hover:text-danger transition-colors" />
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </section>

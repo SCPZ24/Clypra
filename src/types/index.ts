@@ -61,6 +61,7 @@ export interface Project {
   canvasHeight: number;
   frameRate: 24 | 30 | 60;
   duration: number;
+  mediaAssets?: MediaAsset[];
 }
 
 export type TrackType = "video" | "audio" | "text";
