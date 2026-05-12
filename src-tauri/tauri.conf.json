@@ -12,10 +12,10 @@
   "app": {
     "windows": [
       {
-        "title": "Clypra",
+        "title": "",
         "width": 1100,
         "height": 720,
-        "backgroundColor": "#0f0f0f"
+        "titleBarStyle": "Overlay"
       }
     ],
     "security": {

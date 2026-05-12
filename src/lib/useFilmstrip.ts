@@ -77,6 +77,12 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
   // Track previous request signature to avoid duplicate decode requests.
   const prevRequestKeyRef = useRef<string>("");
 
+  // Hold reference to previous epoch's artifacts to prevent premature bitmap closure
+  const prevArtifactsRef = useRef<readonly TransportArtifact[]>([]);
+
+  // Hold reference to current artifacts for unmount cleanup (avoids stale closure)
+  const currentArtifactsRef = useRef<readonly TransportArtifact[]>([]);
+
   // Clear previous bitmaps on unmount or re-request
   const disposePrev = useCallback(() => {
     cancelRef.current?.();
@@ -154,7 +160,23 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
           }
         }
         const sorted = Array.from(bestByTime.values()).sort((a, b) => a.timestampMs - b.timestampMs);
+
+        console.log("[useFilmstrip] scheduleFlush: setting", sorted.length, "artifacts");
+        // Close previous epoch's bitmaps now that we have new ones ready
+        // This prevents black gaps during the transition
+        for (const prevArtifact of prevArtifactsRef.current) {
+          if (prevArtifact.bitmap) {
+            // Only close if this bitmap isn't being reused in the new set
+            const isReused = sorted.some((a) => a.bitmap === prevArtifact.bitmap);
+            if (!isReused) {
+              prevArtifact.bitmap.close();
+            }
+          }
+        }
+        prevArtifactsRef.current = sorted;
+
         setArtifacts(sorted);
+        currentArtifactsRef.current = sorted; // Keep ref in sync for unmount cleanup
         setIsLoading(false);
       });
     };
@@ -169,10 +191,12 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
       epochId,
       clipId,
       onArtifact: (artifact) => {
+        console.log("[useFilmstrip] onArtifact received:", artifact.timestampMs, "tier:", artifact.spatialTier, "bitmap:", !!artifact.bitmap);
         const key = `${artifact.timestampMs}:${artifact.spatialTier}`;
         // Close existing bitmap for this key if we're replacing it
         const existing = accumulated.get(key);
         if (existing && existing.bitmap && existing.bitmap !== artifact.bitmap) {
+          console.log("[useFilmstrip] Closing replaced bitmap for key:", key);
           existing.bitmap.close();
         }
         accumulated.set(key, artifact);
@@ -199,7 +223,20 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
           }
         }
         const sorted = Array.from(bestByTime.values()).sort((a, b) => a.timestampMs - b.timestampMs);
+
+        // Close previous epoch's bitmaps now that the full new set is ready
+        for (const prevArtifact of prevArtifactsRef.current) {
+          if (prevArtifact.bitmap) {
+            const isReused = sorted.some((a) => a.bitmap === prevArtifact.bitmap);
+            if (!isReused) {
+              prevArtifact.bitmap.close();
+            }
+          }
+        }
+        prevArtifactsRef.current = sorted;
+
         setArtifacts(sorted);
+        currentArtifactsRef.current = sorted; // Keep ref in sync for unmount cleanup
         setIsLoading(false);
       },
     });
@@ -210,12 +247,8 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
         cancelAnimationFrame(rafId);
         rafId = null;
       }
-      // CRITICAL: Close all accumulated bitmaps on epoch change to prevent GPU leak
-      for (const artifact of accumulated.values()) {
-        if (artifact.bitmap) {
-          artifact.bitmap.close();
-        }
-      }
+      // CRITICAL: Don't close accumulated bitmaps here - they're now tracked in prevArtifactsRef
+      // and will be closed when the next batch completes (in scheduleFlush/onComplete)
       accumulated.clear();
       disposePrev();
     };
@@ -238,18 +271,29 @@ export function useFilmstrip(opts: UseFilmstripOptions): UseFilmstripResult {
     disposePrev,
   ]);
 
-  // Unmount cleanup - close all bitmaps to prevent GPU leak
+  // Unmount cleanup ONLY - close all bitmaps to prevent GPU leak
+  // Uses refs to avoid stale closures and running on every artifacts change
   useEffect(() => {
     return () => {
+      console.log("[useFilmstrip] UNMOUNT cleanup - closing all bitmaps");
       disposePrev();
-      // Close all bitmaps in the current artifacts array
-      for (const artifact of artifacts) {
+      // Close all bitmaps in the current artifacts ref
+      for (const artifact of currentArtifactsRef.current) {
         if (artifact.bitmap) {
+          console.log("[useFilmstrip] Closing artifact bitmap on unmount:", artifact.timestampMs);
+          artifact.bitmap.close();
+        }
+      }
+      // Also close any lingering previous epoch bitmaps
+      for (const artifact of prevArtifactsRef.current) {
+        if (artifact.bitmap && !currentArtifactsRef.current.some((a) => a.bitmap === artifact.bitmap)) {
+          console.log("[useFilmstrip] Closing prevArtifact bitmap on unmount:", artifact.timestampMs);
           artifact.bitmap.close();
         }
       }
     };
-  }, [disposePrev, artifacts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // ONLY on unmount - empty deps array!
 
   return {
     artifacts,

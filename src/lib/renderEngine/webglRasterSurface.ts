@@ -202,11 +202,21 @@ export class WebGLRasterSurface {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, atlasW, atlasH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
 
     // Upload each bitmap into its atlas cell
+    // DEFENSIVE: Skip any invalid/closed bitmaps to prevent black gaps
     for (let i = 0; i < artifacts.length; i++) {
       const art = artifacts[i];
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, col * cellW, row * cellH, gl.RGBA, gl.UNSIGNED_BYTE, art.bitmap);
+      if (!art.bitmap || art.bitmap.width === 0 || art.bitmap.height === 0) {
+        // Bitmap is closed or invalid - skip upload
+        continue;
+      }
+      try {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, col * cellW, row * cellH, gl.RGBA, gl.UNSIGNED_BYTE, art.bitmap);
+      } catch (e) {
+        // Bitmap was closed between the check and upload - skip silently
+        console.warn(`[WebGLRasterSurface] Failed to upload bitmap at index ${i}:`, e);
+      }
     }
 
     // ── Build per-tile geometry ─────────────────────────────────────────────
@@ -229,11 +239,16 @@ export class WebGLRasterSurface {
       const tileRatio = tileCount > 1 ? i / (tileCount - 1) : 0;
       const targetTimestamp = firstTimestamp + timeSpan * tileRatio;
 
-      // Binary search for closest artifact by timestamp
+      // Find closest valid artifact by timestamp (unbounded - no threshold)
       let artIdx = 0;
       let minDiff = Infinity;
       for (let j = 0; j < artifacts.length; j++) {
-        const diff = Math.abs(artifacts[j].timestampMs - targetTimestamp);
+        const art = artifacts[j];
+        // DEFENSIVE: Skip invalid/closed bitmaps
+        if (!art.bitmap || art.bitmap.width === 0 || art.bitmap.height === 0) {
+          continue;
+        }
+        const diff = Math.abs(art.timestampMs - targetTimestamp);
         if (diff < minDiff) {
           minDiff = diff;
           artIdx = j;
@@ -242,6 +257,11 @@ export class WebGLRasterSurface {
 
       const cell = cells[artIdx];
       const art = artifacts[artIdx];
+
+      // DEFENSIVE: Skip this tile if the selected artifact is invalid
+      if (!art.bitmap || art.bitmap.width === 0 || art.bitmap.height === 0) {
+        continue;
+      }
       const tileX = i * tileW;
 
       // Center-crop: scale bitmap to cover tile, then crop to fit

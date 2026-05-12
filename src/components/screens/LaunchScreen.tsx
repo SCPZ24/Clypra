@@ -45,15 +45,9 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
           const mediaAssets: MediaAsset[] = Array.isArray(rustProject.media_assets)
             ? rustProject.media_assets.map((asset: MediaAsset) => ({
                 ...asset,
-                posterFrame: asset.posterFrame && !isExternalOrDataUrl(asset.posterFrame)
-                  ? convertFileSrc(asset.posterFrame)
-                  : asset.posterFrame,
-                coverArt: asset.coverArt && !isExternalOrDataUrl(asset.coverArt)
-                  ? convertFileSrc(asset.coverArt)
-                  : asset.coverArt,
-                path: asset.path && asset.type === "image" && !isExternalOrDataUrl(asset.path)
-                  ? convertFileSrc(asset.path)
-                  : asset.path,
+                posterFrame: asset.posterFrame && !isExternalOrDataUrl(asset.posterFrame) ? convertFileSrc(asset.posterFrame) : asset.posterFrame,
+                coverArt: asset.coverArt && !isExternalOrDataUrl(asset.coverArt) ? convertFileSrc(asset.coverArt) : asset.coverArt,
+                path: asset.path && asset.type === "image" && !isExternalOrDataUrl(asset.path) ? convertFileSrc(asset.path) : asset.path,
               }))
             : [];
           return {
@@ -114,18 +108,22 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
 
   return (
     <div className="w-full h-full bg-bg flex flex-col overflow-hidden">
+      {/* Native title bar area */}
+      <div className="h-[37px] select-none flex items-center justify-center bg-transparent" data-tauri-drag-region style={{ WebkitAppRegion: "drag" } as React.CSSProperties}>
+        <span className="text-xs font-semibold text-text-muted/60">Clypra</span>
+      </div>
+
       {/* ── Background gradient ─────────────────────────────────── */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
-          background:
-            "radial-gradient(ellipse 80% 50% at 50% -10%, var(--color-accent, #6c63ff) 0%, transparent 60%)",
+          background: "radial-gradient(ellipse 80% 50% at 50% -10%, var(--color-accent, #6c63ff) 0%, transparent 60%)",
           opacity: 0.06,
         }}
       />
 
       {/* ── Content ────────────────────────────────────────────── */}
-      <div className="relative z-10 flex-1 flex flex-col max-w-5xl mx-auto w-full px-6 md:px-10 py-8 overflow-y-auto scrollbar-thin">
+      <div className="relative z-10 flex-1 flex flex-col w-full px-6 md:px-10 py-8 overflow-y-auto scrollbar-thin">
         {/* Header / Brand */}
         <header className="flex items-center justify-between mb-12">
           <div className="flex items-center gap-3">
@@ -145,8 +143,7 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
           <div
             className="relative rounded-2xl overflow-hidden border border-white/[0.04] p-8 md:p-10 flex flex-col items-center text-center"
             style={{
-              background:
-                "linear-gradient(135deg, var(--color-surface, #1a1a1a) 0%, var(--color-bg, #0f0f0f) 100%)",
+              background: "linear-gradient(135deg, var(--color-surface, #1a1a1a) 0%, var(--color-bg, #0f0f0f) 100%)",
             }}
           >
             {/* Subtle glow */}
@@ -164,18 +161,9 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
                 <Sparkles className="w-3 h-3" />
                 Create something amazing
               </div>
-              <h2 className="text-2xl md:text-3xl font-bold text-text-primary mb-2 tracking-tight">
-                Start a new project
-              </h2>
-              <p className="text-sm text-text-muted mb-6 max-w-md">
-                Begin with a 9:16 portrait canvas optimized for social media, or open a recent project below.
-              </p>
-              <Button
-                variant="default"
-                size="lg"
-                onClick={handleStartNewProject}
-                className="px-8 py-3 text-base font-semibold rounded-xl shadow-lg shadow-accent/20 hover:shadow-accent/30 transition-shadow"
-              >
+              <h2 className="text-2xl md:text-3xl font-bold text-text-primary mb-2 tracking-tight">Start a new project</h2>
+              <p className="text-sm text-text-muted mb-6 max-w-md">Begin with a 9:16 portrait canvas optimized for social media, or open a recent project below.</p>
+              <Button variant="default" size="lg" onClick={handleStartNewProject} className="px-8 py-3 text-base font-semibold rounded-xl shadow-lg shadow-accent/20 hover:shadow-accent/30 transition-shadow">
                 <Plus className="w-5 h-5 mr-2" />
                 New Project
               </Button>
@@ -201,11 +189,7 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
               {recentProjects.map((project) => {
                 const thumbnail = getProjectThumbnail(project);
                 return (
-                  <button
-                    key={project.id}
-                    onClick={() => onProjectOpen(project)}
-                    className="group relative text-left rounded-xl border border-white/[0.04] bg-surface hover:bg-surface-raised transition-all duration-200 hover:-translate-y-0.5 hover:border-white/[0.08] hover:shadow-lg hover:shadow-black/20 overflow-hidden"
-                  >
+                  <button key={project.id} onClick={() => onProjectOpen(project)} className="group relative text-left rounded-xl border border-white/[0.04] bg-surface hover:bg-surface-raised transition-all duration-200 hover:-translate-y-0.5 hover:border-white/[0.08] hover:shadow-lg hover:shadow-black/20 overflow-hidden">
                     {/* Thumbnail area */}
                     <div className="h-[170px] bg-bg flex items-center justify-center relative overflow-hidden">
                       {thumbnail ? (
@@ -222,16 +206,12 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
                       {/* Accent glow on hover */}
                       <div className="absolute inset-0 bg-accent/[0.03] opacity-0 group-hover:opacity-100 transition-opacity" />
                       {/* Aspect ratio badge */}
-                      <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-bg/75 backdrop-blur-sm text-text-muted border border-white/[0.06]">
-                        {project.aspectRatio}
-                      </span>
+                      <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-bg/75 backdrop-blur-sm text-text-muted border border-white/[0.06]">{project.aspectRatio}</span>
                     </div>
 
                     {/* Info */}
                     <div className="px-3.5 py-4">
-                      <h4 className="text-sm font-semibold text-text-primary truncate group-hover:text-accent-soft transition-colors">
-                        {project.name}
-                      </h4>
+                      <h4 className="text-sm font-semibold text-text-primary truncate group-hover:text-accent-soft transition-colors">{project.name}</h4>
                       <div className="flex items-center justify-between mt-2">
                         <span className="text-xs text-text-muted">{formatDate(project.createdAt)}</span>
                         <ChevronRight className="w-3.5 h-3.5 text-text-muted/30 group-hover:text-accent/60 transition-colors" />
@@ -239,11 +219,7 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
                     </div>
 
                     {/* Delete button */}
-                    <div
-                      onClick={(e) => handleDeleteClick(e, project)}
-                      className="absolute top-2 left-2 p-1.5 rounded-lg bg-bg/80 backdrop-blur-sm border border-white/[0.04] opacity-0 group-hover:opacity-100 transition-opacity hover:bg-danger/20 hover:border-danger/30 cursor-pointer"
-                      title="Delete project"
-                    >
+                    <div onClick={(e) => handleDeleteClick(e, project)} className="absolute top-2 left-2 p-1.5 rounded-lg bg-bg/80 backdrop-blur-sm border border-white/[0.04] opacity-0 group-hover:opacity-100 transition-opacity hover:bg-danger/20 hover:border-danger/30 cursor-pointer" title="Delete project">
                       <Trash2 className="w-3.5 h-3.5 text-text-muted hover:text-danger transition-colors" />
                     </div>
                   </button>
@@ -252,11 +228,6 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
             </div>
           )}
         </section>
-
-        {/* Footer */}
-        <footer className="mt-8 pt-4 border-t border-white/[0.03] flex items-center justify-center">
-          <span className="text-[10px] text-text-muted/40">Built with Tauri • React • FFmpeg</span>
-        </footer>
       </div>
 
       {/* Delete Confirmation Modal */}
