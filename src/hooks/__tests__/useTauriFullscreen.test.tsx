@@ -2,53 +2,36 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useTauriFullscreen } from "../useTauriFullscreen";
 
+// Mock the Tauri window API
+let mockIsFullscreen = false;
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    isFullscreen: vi.fn(async () => mockIsFullscreen),
+    setFullscreen: vi.fn(async (value: boolean) => {
+      mockIsFullscreen = value;
+    }),
+  }),
+}));
+
 describe("useTauriFullscreen", () => {
-  let mockFullscreenElement: Element | null = null;
-  let fullscreenChangeListeners: Array<() => void> = [];
-
   beforeEach(() => {
-    // Mock fullscreen API
-    mockFullscreenElement = null;
-    fullscreenChangeListeners = [];
-
-    Object.defineProperty(document, "fullscreenEnabled", {
-      writable: true,
-      value: true,
-    });
-
-    Object.defineProperty(document, "fullscreenElement", {
-      get: () => mockFullscreenElement,
-    });
-
-    document.documentElement.requestFullscreen = vi.fn(async () => {
-      mockFullscreenElement = document.documentElement;
-      fullscreenChangeListeners.forEach((listener) => listener());
-    });
-
-    document.exitFullscreen = vi.fn(async () => {
-      mockFullscreenElement = null;
-      fullscreenChangeListeners.forEach((listener) => listener());
-    });
-
-    document.addEventListener = vi.fn((event: string, listener: any) => {
-      if (event === "fullscreenchange") {
-        fullscreenChangeListeners.push(listener);
-      }
-    });
-
-    document.removeEventListener = vi.fn((event: string, listener: any) => {
-      if (event === "fullscreenchange") {
-        fullscreenChangeListeners = fullscreenChangeListeners.filter((l) => l !== listener);
-      }
-    });
+    mockIsFullscreen = false;
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  it("should initialize with isFullscreen false", () => {
+  it("should initialize with isFullscreen false", async () => {
     const { result } = renderHook(() => useTauriFullscreen());
+
+    // Let the initial poll resolve
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
 
     expect(result.current.isFullscreen).toBe(false);
     expect(result.current.isSupported).toBe(true);
@@ -58,75 +41,88 @@ describe("useTauriFullscreen", () => {
     const { result } = renderHook(() => useTauriFullscreen());
 
     await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    await act(async () => {
       await result.current.enterFullscreen();
     });
 
-    await waitFor(() => {
-      expect(result.current.isFullscreen).toBe(true);
-    });
-
-    expect(document.documentElement.requestFullscreen).toHaveBeenCalled();
+    expect(result.current.isFullscreen).toBe(true);
   });
 
   it("should exit fullscreen", async () => {
     const { result } = renderHook(() => useTauriFullscreen());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
 
     // Enter fullscreen first
     await act(async () => {
       await result.current.enterFullscreen();
     });
 
-    await waitFor(() => {
-      expect(result.current.isFullscreen).toBe(true);
-    });
+    expect(result.current.isFullscreen).toBe(true);
 
     // Exit fullscreen
     await act(async () => {
       await result.current.exitFullscreen();
     });
 
-    await waitFor(() => {
-      expect(result.current.isFullscreen).toBe(false);
-    });
-
-    expect(document.exitFullscreen).toHaveBeenCalled();
+    expect(result.current.isFullscreen).toBe(false);
   });
 
   it("should toggle fullscreen", async () => {
     const { result } = renderHook(() => useTauriFullscreen());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
 
     // Toggle to enter
     await act(async () => {
       await result.current.toggleFullscreen();
     });
 
-    await waitFor(() => {
-      expect(result.current.isFullscreen).toBe(true);
-    });
+    expect(result.current.isFullscreen).toBe(true);
 
     // Toggle to exit
     await act(async () => {
       await result.current.toggleFullscreen();
     });
 
-    await waitFor(() => {
-      expect(result.current.isFullscreen).toBe(false);
-    });
+    expect(result.current.isFullscreen).toBe(false);
   });
 
-  it("should call onFullscreenChange callback", async () => {
-    // useTauriFullscreen doesn't support callbacks, skip this test
-    expect(true).toBe(true);
-  });
-
-  it("should handle unsupported fullscreen API", () => {
-    Object.defineProperty(document, "fullscreenEnabled", {
-      writable: true,
-      value: false,
-    });
-
+  it("should detect external fullscreen changes via polling", async () => {
     const { result } = renderHook(() => useTauriFullscreen());
 
-    expect(result.current.isSupported).toBe(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(result.current.isFullscreen).toBe(false);
+
+    // Simulate external fullscreen change (e.g. macOS green button)
+    mockIsFullscreen = true;
+
+    // Advance past the 500ms poll interval
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(result.current.isFullscreen).toBe(true);
+  });
+
+  it("should always report isSupported as true in Tauri", async () => {
+    const { result } = renderHook(() => useTauriFullscreen());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // isSupported is hardcoded to true since Tauri always supports fullscreen
+    expect(result.current.isSupported).toBe(true);
   });
 });
