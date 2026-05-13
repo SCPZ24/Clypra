@@ -12,7 +12,7 @@ import { useUIStore } from "../../store/uiStore";
 import { useRenderEngineStore } from "../../store/renderEngineStore";
 
 export const EditorScreen: React.FC = () => {
-  const { toastMessage } = useKeyboardShortcuts();
+  const { toastMessage } = useProjectStore();
   const { setDuration } = usePlaybackControls();
   const { project } = useProjectStore();
   const { showSettingsModal, toggleSettingsModal } = useUIStore();

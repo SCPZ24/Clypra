@@ -1,5 +1,28 @@
 /**
- * History Store - Zustand Integration for Command History
+ * History Store
+ *
+ * OWNERSHIP: Undo/redo command journal (persistent domain state)
+ * PERSISTENCE: Should be persistent (future: save with project)
+ * MUTABILITY: Append-only command log
+ *
+ * Responsibilities:
+ * - Execute commands against timelineStore
+ * - Maintain undo/redo stacks
+ * - Provide undo/redo operations
+ * - Track history state (canUndo, canRedo)
+ *
+ * Does NOT:
+ * - Directly mutate timeline (commands do that)
+ * - Own timeline state (timelineStore is source of truth)
+ * - Manage runtime resources (ProjectSession handles that)
+ *
+ * Architecture principle:
+ * Commands are the single mutation path for timeline state.
+ * This enables:
+ * - Deterministic undo/redo
+ * - Command replay for testing
+ * - Future: collaborative editing (commands as CRDT operations)
+ * - Future: AI orchestration (commands as operation primitives)
  *
  * Bridges the command-based history system with Zustand state management.
  *

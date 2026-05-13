@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useTimelineStore } from "../timelineStore";
+import { useHistoryStore } from "../historyStore";
+import { SplitClipCommand } from "../../core/history/commands/SplitClipCommand";
 import type { Clip } from "../../types";
 
 describe("timelineStore clip operations", () => {
@@ -80,9 +82,10 @@ describe("timelineStore clip operations", () => {
     });
   });
 
-  describe("splitClipAtTime", () => {
+  describe("SplitClipCommand via command system", () => {
     it("preserves duration === trimOut - trimIn for both split clips", () => {
-      const { addClip, addTrack, splitClipAtTime } = useTimelineStore.getState();
+      const { addClip, addTrack } = useTimelineStore.getState();
+      const { execute } = useHistoryStore.getState();
 
       addTrack("video");
       const { tracks } = useTimelineStore.getState();
@@ -104,7 +107,10 @@ describe("timelineStore clip operations", () => {
       };
 
       addClip(clip);
-      splitClipAtTime("clip-1", 4);
+
+      // Use command system instead of direct method
+      const command = new SplitClipCommand("clip-1", 4, clip);
+      execute(command);
 
       const { clips } = useTimelineStore.getState();
       expect(clips).toHaveLength(2);
@@ -127,7 +133,8 @@ describe("timelineStore clip operations", () => {
     });
 
     it("handles split with existing trim points", () => {
-      const { addClip, addTrack, splitClipAtTime } = useTimelineStore.getState();
+      const { addClip, addTrack } = useTimelineStore.getState();
+      const { execute } = useHistoryStore.getState();
 
       addTrack("video");
       const { tracks } = useTimelineStore.getState();
@@ -149,7 +156,10 @@ describe("timelineStore clip operations", () => {
       };
 
       addClip(clip);
-      splitClipAtTime("clip-1", 3); // Split at 3s into the clip
+
+      // Use command system instead of direct method
+      const command = new SplitClipCommand("clip-1", 3, clip);
+      execute(command);
 
       const { clips } = useTimelineStore.getState();
       expect(clips).toHaveLength(2);

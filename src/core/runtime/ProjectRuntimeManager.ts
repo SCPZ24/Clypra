@@ -1,18 +1,29 @@
 /**
  * Project Runtime Manager
  *
+ * OWNERSHIP: Runtime lifecycle orchestration
+ * PERSISTENCE: Non-persistent (ephemeral runtime resources)
+ * MUTABILITY: Manages lifecycle, doesn't own domain state
+ *
  * Phase 2: Disposable ProjectSession architecture.
  *
  * Centralized orchestration point for project-scoped runtime lifecycle.
  * Now delegates to ProjectSession for explicit ownership boundaries.
  *
- * Architecture principle:
- * - Project owns session
- * - Session owns all runtime subsystems
- * - Session dies atomically when project closes
+ * Responsibilities:
+ * - Create/dispose ProjectSession on project switch
+ * - Provide access to active session
+ * - Report runtime health status
  *
- * This prevents state leakage across project switches by enforcing
- * deterministic teardown order and explicit ownership boundaries.
+ * Does NOT:
+ * - Own timeline data (timelineStore owns that)
+ * - Mutate timeline state (only consumes it for playback/render)
+ * - Persist anything (all resources are ephemeral)
+ *
+ * Architecture principle:
+ * Runtime resources (playback clock, scheduler, decoders, GPU contexts)
+ * are session-scoped and disposed atomically on project close.
+ * Domain state (timeline) outlives runtime and is managed separately.
  *
  * Migration from Phase 1:
  * - Phase 1: Manual reset functions (resetPlaybackClock, resetTimelineStore, etc.)
@@ -28,7 +39,7 @@ import { createProjectSession, disposeActiveSession, getActiveSession, getActive
  * Phase 2: Delegates to ProjectSession.
  */
 export async function initializeProjectRuntime(projectId: string): Promise<void> {
-  console.log(`[ProjectRuntimeManager] Initializing runtime for project: ${projectId}`);
+  
   await createProjectSession(projectId);
 }
 
@@ -42,10 +53,10 @@ export async function initializeProjectRuntime(projectId: string): Promise<void>
 export async function disposeProjectRuntime(): Promise<void> {
   const session = getActiveSessionOrNull();
   if (session) {
-    console.log(`[ProjectRuntimeManager] Disposing runtime for project: ${session.projectId}`);
+    
     await disposeActiveSession();
   } else {
-    console.log(`[ProjectRuntimeManager] No active session to dispose`);
+    
   }
 }
 
@@ -56,7 +67,7 @@ export async function disposeProjectRuntime(): Promise<void> {
  * Phase 2: Atomic session switch.
  */
 export async function switchProjectRuntime(newProjectId: string): Promise<void> {
-  console.log(`[ProjectRuntimeManager] Switching to project: ${newProjectId}`);
+  
   await disposeProjectRuntime();
   await initializeProjectRuntime(newProjectId);
 }

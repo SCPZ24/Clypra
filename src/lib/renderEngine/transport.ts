@@ -89,6 +89,7 @@ const _activeEpochs = new Map<string, RenderEpochId>();
 
 /** Register (or replace) the active epoch for a clip. */
 export function registerActiveEpoch(clipId: string, epochId: RenderEpochId): void {
+  const prev = _activeEpochs.get(clipId);
   _activeEpochs.set(clipId, epochId);
 }
 
@@ -271,6 +272,93 @@ export function requestBatchArtifacts(opts: RequestBatchArtifactsOptions): () =>
   return cancel;
 }
 
+// ─── requestBatchRenderArtifacts ───────────────────────────────────────────────
+
+export interface RequestBatchRenderArtifactsOptions {
+  videoPath: string;
+  timestampsMs: number[];
+  spatialTiers: SpatialTier[];
+  epochId: RenderEpochId;
+  clipId: string;
+  onArtifact: (artifact: TransportArtifact) => void;
+  onComplete?: () => void;
+  onError?: (err: unknown) => void;
+  requestId?: string; // For tracing
+}
+
+/**
+ * Request artifacts for multiple timestamps in a single batch invoke.
+ * Streams artifacts as they become available (cached first, then decoded).
+ * Returns a cancel() that stops the entire batch request.
+ */
+export function requestBatchRenderArtifacts(opts: RequestBatchRenderArtifactsOptions): () => void {
+  const { videoPath, timestampsMs, spatialTiers, epochId, clipId, onArtifact, onComplete, onError, requestId } = opts;
+
+  const reqId = requestId || crypto.randomUUID();
+
+  if (timestampsMs.length === 0) {
+    onComplete?.();
+    return () => {};
+  }
+
+  let cancelled = false;
+  const cancel = () => {
+    cancelled = true;
+  };
+
+  let artifactCount = 0;
+  const channel = new Channel<BackendRenderArtifact>();
+  channel.onmessage = async (raw) => {
+    if (cancelled) return;
+    if (!isEpochStillValid(epochId)) {
+      return;
+    }
+
+    artifactCount++;
+
+    try {
+      const bitmap = await rgbaToImageBitmap(raw.rgba_data, raw.width, raw.height);
+      if (cancelled || !isEpochStillValid(epochId)) {
+        bitmap.close();
+        return;
+      }
+      onArtifact({
+        frameId: raw.frame_id,
+        contentHash: raw.content_hash,
+        spatialTier: raw.spatial_tier,
+        bitmap,
+        width: raw.width,
+        height: raw.height,
+        timestampMs: raw.timestamp_ms,
+        epochId,
+      });
+    } catch (err) {
+      onError?.(err);
+    }
+  };
+
+  invoke("get_render_artifacts_batch", {
+    videoPath,
+    timestampsMs,
+    spatialTiers: spatialTiers.map(spatialTierToLabel),
+    effectGraphVersion: 0,
+    requestId: reqId,
+    onArtifact: channel,
+  })
+    .then(() => {
+      if (!cancelled) {
+        onComplete?.();
+      }
+    })
+    .catch((err) => {
+      if (!cancelled) {
+        onError?.(err);
+      }
+    });
+
+  return cancel;
+}
+
 // ─── requestProgressiveTiers ──────────────────────────────────────────────────
 
 export interface RequestProgressiveTiersOptions {
@@ -286,6 +374,7 @@ export interface RequestProgressiveTiersOptions {
   onComplete?: () => void;
   onError?: (err: unknown) => void;
   concurrency?: number;
+  requestId?: string; // For tracing
 }
 
 // Export type for tests – alias to the request options interface
@@ -300,7 +389,7 @@ export type ProgressiveTierRequest = RequestProgressiveTiersOptions;
  * Returns a cancel() that stops the entire sequence.
  */
 export function requestProgressiveTiers(opts: RequestProgressiveTiersOptions): () => void {
-  const { videoPath, timestampsMs, startTier, targetTier, epochId, clipId, onArtifact, onComplete, onError, concurrency } = opts;
+  const { videoPath, timestampsMs, startTier, targetTier, epochId, clipId, onArtifact, onComplete, onError, concurrency, requestId } = opts;
 
   let cancelled = false;
   let currentCancel: (() => void) | null = null;
@@ -329,18 +418,18 @@ export function requestProgressiveTiers(opts: RequestProgressiveTiersOptions): (
 
     const [width, height] = SPATIAL_TIER_DIMS[tier];
 
-    currentCancel = requestBatchArtifacts({
+    currentCancel = requestBatchRenderArtifacts({
       videoPath,
       timestampsMs,
       spatialTiers: [tier],
       epochId,
       clipId,
       onArtifact,
-      concurrency,
       onComplete: () => {
         if (!cancelled) runTier(idx + 1);
       },
       onError,
+      requestId,
     });
 
     // Suppress unused variable warning — width/height used by Rust side via spatialTiers
@@ -349,5 +438,113 @@ export function requestProgressiveTiers(opts: RequestProgressiveTiersOptions): (
   };
 
   runTier(0);
+  return cancel;
+}
+
+// ─── Batch Coalescing Scheduler ─────────────────────────────────────────────────
+
+/**
+ * Simple batch coalescing scheduler for viewport requests.
+ * Merges multiple requests for the same clip within a debounce window.
+ * Prevents redundant requests during rapid scrolling/scrubbing.
+ */
+interface PendingRequest {
+  clipId: string;
+  timestampsMs: number[];
+  epochId: RenderEpochId;
+  spatialTiers: SpatialTier[];
+  callbacks: Set<(artifact: TransportArtifact) => void>;
+  completes: Set<() => void>;
+  errors: Set<(err: unknown) => void>;
+  cancelFns: Set<() => void>;
+}
+
+const pendingRequests = new Map<string, PendingRequest>();
+let schedulerTimeout: ReturnType<typeof setTimeout> | null = null;
+const COALESCE_WINDOW_MS = 50; // Debounce window for coalescing
+
+/**
+ * Schedule a batch request with coalescing.
+ * Multiple requests for the same clip within the coalesce window are merged.
+ */
+export function scheduleCoalescedBatch(opts: { clipId: string; videoPath: string; timestampsMs: number[]; epochId: RenderEpochId; spatialTiers: SpatialTier[]; onArtifact: (artifact: TransportArtifact) => void; onComplete?: () => void; onError?: (err: unknown) => void }): () => void {
+  const { clipId, videoPath, timestampsMs, epochId, spatialTiers, onArtifact, onComplete, onError } = opts;
+
+  // Get or create pending request for this clip
+  let pending = pendingRequests.get(clipId);
+  if (!pending) {
+    pending = {
+      clipId,
+      timestampsMs: [],
+      epochId,
+      spatialTiers,
+      callbacks: new Set(),
+      completes: new Set(),
+      errors: new Set(),
+      cancelFns: new Set(),
+    };
+    pendingRequests.set(clipId, pending);
+  }
+
+  // Merge timestamps (deduplicate and sort)
+  const mergedTimestamps = new Set([...pending.timestampsMs, ...timestampsMs]);
+  pending.timestampsMs = Array.from(mergedTimestamps).sort((a, b) => a - b);
+  pending.epochId = epochId; // Update to latest epoch
+  pending.spatialTiers = spatialTiers; // Update to latest tiers
+  pending.callbacks.add(onArtifact);
+  if (onComplete) pending.completes.add(onComplete);
+  if (onError) pending.errors.add(onError);
+
+  // Cancel function for this specific request
+  const cancel = () => {
+    pending?.callbacks.delete(onArtifact);
+    if (onComplete) pending?.completes.delete(onComplete);
+    if (onError) pending?.errors.delete(onError);
+  };
+  pending.cancelFns.add(cancel);
+
+  // Reset scheduler timeout
+  if (schedulerTimeout) {
+    clearTimeout(schedulerTimeout);
+  }
+
+  schedulerTimeout = setTimeout(() => {
+    // Execute coalesced request
+    for (const [clipId, pending] of pendingRequests.entries()) {
+      const batchCancel = requestBatchRenderArtifacts({
+        videoPath,
+        timestampsMs: pending.timestampsMs,
+        spatialTiers: pending.spatialTiers,
+        epochId: pending.epochId,
+        clipId,
+        onArtifact: (artifact) => {
+          // Distribute to all waiting callbacks
+          for (const cb of pending.callbacks) {
+            cb(artifact);
+          }
+        },
+        onComplete: () => {
+          // Call all complete callbacks
+          for (const cb of pending.completes) {
+            cb();
+          }
+        },
+        onError: (err) => {
+          // Call all error callbacks
+          for (const cb of pending.errors) {
+            cb(err);
+          }
+        },
+      });
+
+      // Store batch cancel for cleanup
+      pending.cancelFns.add(batchCancel);
+    }
+
+    // Clear pending requests
+    pendingRequests.clear();
+    schedulerTimeout = null;
+  }, COALESCE_WINDOW_MS);
+
   return cancel;
 }

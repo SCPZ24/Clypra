@@ -141,7 +141,7 @@ export const LaunchScreen: React.FC<LaunchScreenProps> = ({ onProjectCreate, onP
         {/* ── Hero / New Project ────────────────────────────────── */}
         <section className="mb-12">
           <div
-            className="relative rounded-2xl overflow-hidden border border-white/[0.04] p-8 md:p-10 flex flex-col items-center text-center"
+            className="relative rounded-2xl overflow-hidden border border-white/4 p-8 md:p-10 flex flex-col items-center text-center"
             style={{
               background: "linear-gradient(135deg, var(--color-surface, #1a1a1a) 0%, var(--color-bg, #0f0f0f) 100%)",
             }}

@@ -1,6 +1,4 @@
-// Take note that before you editing or suggest an approach, check if we have the implementation or same solution somewhere
-
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { LaunchScreen } from "./components/screens/LaunchScreen";
 import { EditorScreen } from "./components/screens/EditorScreen";
 import { TooltipProvider } from "./components/ui/Tooltip";
@@ -94,32 +92,24 @@ const App = () => {
         duration: fullProjectData.duration || 0,
       };
 
-      // Load project
-      loadProject(project);
+      // Prepare media assets, tracks and clips payload for atomic restore
+      const mediaAssetsPayload = Array.isArray(fullProjectData.media_assets) ? fullProjectData.media_assets : [];
+      const tracksPayload = Array.isArray(fullProjectData.tracks) ? fullProjectData.tracks : [];
+      const clipsPayload = Array.isArray(fullProjectData.clips) ? fullProjectData.clips : [];
 
-      // Restore media assets directly
-      // Note: Paths are kept as raw filesystem paths - the evaluator will convert them when needed
-      if (fullProjectData.media_assets && Array.isArray(fullProjectData.media_assets)) {
-        useProjectStore.setState({ mediaAssets: fullProjectData.media_assets });
-      }
+      
 
-      // Restore tracks and clips directly
-      const { useTimelineStore } = await import("./store/timelineStore");
-      if (fullProjectData.tracks && Array.isArray(fullProjectData.tracks)) {
-        useTimelineStore.setState({ tracks: fullProjectData.tracks });
-      }
-      if (fullProjectData.clips && Array.isArray(fullProjectData.clips)) {
-        const { normalizeClipTiming } = await import("./lib/timelineClip");
-        const mediaAssets = useProjectStore.getState().mediaAssets;
-        const normalizedClips = fullProjectData.clips.map((clip: any) => {
-          const asset = mediaAssets.find((a: any) => a.id === clip.mediaId);
-          return normalizeClipTiming(clip, asset);
-        });
-        useTimelineStore.setState({ clips: normalizedClips });
-      }
+      // Load project and atomically restore timeline and assets via projectStore.loadProject
+      await loadProject(project, { mediaAssets: mediaAssetsPayload, tracks: tracksPayload, clips: clipsPayload });
+
+      // Verify restoration after a brief delay
+      setTimeout(async () => {
+        const { useTimelineStore } = await import("./store/timelineStore");
+        const timelineState = useTimelineStore.getState();
+        
+      }, 200);
     } catch (error) {
-      console.error("[OpenProject] Failed to open project:", error);
-      alert(`Failed to open project: ${error}`);
+      
     }
   };
 

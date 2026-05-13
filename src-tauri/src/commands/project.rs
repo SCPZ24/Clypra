@@ -19,15 +19,22 @@ fn get_projects_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 #[tauri::command]
 pub fn save_project(app: tauri::AppHandle, project_data: String) -> Result<(), String> {
     let projects_dir = get_projects_dir(&app)?;
-    
+
     let project: Project = serde_json::from_str(&project_data)
         .map_err(|e| format!("Invalid project JSON: {}", e))?;
-    
+
     let file_path = projects_dir.join(format!("{}.json", project.id));
-    
+
+    println!("[save_project] Saving project {} with {} tracks, {} clips, {} media_assets",
+        project.id,
+        project.tracks.len(),
+        project.clips.len(),
+        project.media_assets.len()
+    );
+
     fs::write(&file_path, &project_data)
         .map_err(|e| format!("Failed to save project: {}", e))?;
-    
+
     Ok(())
 }
 

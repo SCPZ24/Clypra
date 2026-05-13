@@ -61,7 +61,6 @@ export class EditingActions {
    * Execute a split operation.
    *
    * This is the ONLY way split should be triggered from UI.
-   * Direct calls to splitClipAtTime() are deprecated.
    *
    * @param intent - Split intent (what to split, where, why)
    * @returns Split result

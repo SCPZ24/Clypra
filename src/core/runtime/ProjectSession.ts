@@ -1,13 +1,40 @@
 /**
  * Project Session - Disposable Runtime Container
  *
+ * OWNERSHIP: Ephemeral runtime resources (playback, scheduling, GPU, decoders)
+ * PERSISTENCE: Non-persistent (all resources disposed on close)
+ * MUTABILITY: Manages resource lifecycle, consumes domain state as immutable input
+ *
  * Phase 2 Architecture: Explicit ownership boundaries.
  *
  * Key principles:
- * - Session owns all runtime subsystems
- * - Subsystems cannot outlive session
+ * - Session owns runtime resources (clock, scheduler, decoders, GPU contexts)
+ * - Session CONSUMES timeline state, never mutates it
+ * - Session resets ephemeral UI state (selections) on init/dispose
  * - Disposal is atomic and deterministic
  * - No global singletons (except session registry)
+ *
+ * Responsibilities:
+ * - Own playback clock (transport state)
+ * - Own frame scheduler (render job queue)
+ * - Track video elements, audio nodes, RAF loops for cleanup
+ * - Reset ephemeral UI state (selections, preview mode)
+ *
+ * Does NOT:
+ * - Own timeline data (timelineStore is source of truth)
+ * - Mutate clips/tracks (only reads for playback/render)
+ * - Persist anything (all resources are session-scoped)
+ * - Reset timeline store (projectStore handles load/save)
+ *
+ * Architecture principle:
+ * Runtime resources consume timeline state as immutable input.
+ * Timeline state outlives runtime sessions and is managed by projectStore.
+ * This separation enables:
+ * - Deterministic undo/redo (timeline mutations are journaled)
+ * - Collaborative editing (timeline is CRDT-compatible)
+ * - Background rendering (snapshot timeline, render in worker)
+ * - Crash recovery (timeline persists, runtime restarts)
+ * - AI orchestration (timeline is deterministic operation target)
  *
  * This prevents:
  * - State leakage across projects
@@ -15,6 +42,7 @@
  * - Async tasks surviving project switch
  * - Hidden global state
  * - Resource leaks
+ * - Ghost state bugs (runtime silently mutating domain state)
  */
 
 import { PlaybackClock } from "../playback/PlaybackClock";
@@ -114,7 +142,7 @@ export class ProjectSession {
     }
 
     try {
-      console.log(`[ProjectSession] Initializing session: ${this.sessionId}`);
+      
 
       // Create owned subsystems
       this._playback = new PlaybackClock();
@@ -126,7 +154,7 @@ export class ProjectSession {
       this._state = "active";
       this._notifyListeners({ type: "initialized", session: this });
 
-      console.log(`[ProjectSession] Session initialized: ${this.sessionId}`);
+      
     } catch (error) {
       this._state = "disposed";
       this._notifyListeners({ type: "error", session: this, error: error as Error });
@@ -153,7 +181,7 @@ export class ProjectSession {
     }
 
     this._state = "disposing";
-    console.log(`[ProjectSession] Disposing session: ${this.sessionId}`);
+    
 
     try {
       // Deterministic teardown order (critical for avoiding race conditions)
@@ -194,7 +222,7 @@ export class ProjectSession {
       this._state = "disposed";
       this._notifyListeners({ type: "disposed", session: this });
 
-      console.log(`[ProjectSession] Session disposed: ${this.sessionId}`);
+      
     } catch (error) {
       console.error(`[ProjectSession] Disposal error:`, error);
       this._state = "disposed"; // Mark as disposed even on error
@@ -249,23 +277,10 @@ export class ProjectSession {
   // ─── Private Helpers ────────────────────────────────────────────────────
 
   private async _initializeStores(): Promise<void> {
-    const { useTimelineStore } = await import("../../store/timelineStore");
     const { useUIStore } = await import("../../store/uiStore");
-    const { TIMELINE_ZOOM_DEFAULT, TIMELINE_PPS_PER_ZOOM } = await import("../../lib/timelineZoom");
 
-    // Reset timeline store
-    useTimelineStore.setState({
-      tracks: [],
-      clips: [],
-      mainVideoTrackId: null,
-      epoch: 0,
-      zoomLevel: TIMELINE_ZOOM_DEFAULT,
-      scrollLeft: 0,
-      pixelsPerSecond: TIMELINE_ZOOM_DEFAULT * TIMELINE_PPS_PER_ZOOM,
-      rippleEditEnabled: false,
-    });
-
-    // Reset UI store
+    // Reset UI store (selection state, preview mode)
+    // Timeline store is managed by projectStore - don't touch it here
     useUIStore.setState({
       selectedClipIds: [],
       selectedTrackId: null,
@@ -376,7 +391,7 @@ class SessionRegistry {
    */
   async setActiveSession(session: ProjectSession | null): Promise<void> {
     if (this._activeSession && this._activeSession !== session) {
-      console.log(`[SessionRegistry] Disposing previous session: ${this._activeSession.sessionId}`);
+      
       await this._activeSession.dispose();
     }
     this._activeSession = session;

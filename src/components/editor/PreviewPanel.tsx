@@ -526,7 +526,6 @@ const ProgramPreview: React.FC = () => {
             // 100ms - 300ms: Soft playbackRate correction (2% instead of 5%)
             const correctionSpeed = video.currentTime < targetTime ? clockState.speed * 1.02 : clockState.speed * 0.98;
             if (Math.abs(video.playbackRate - correctionSpeed) > 0.01) {
-              console.log("[PreviewPanel] Soft drift correction", { drift: drift.toFixed(3), newSpeed: correctionSpeed.toFixed(2), currentTime: video.currentTime });
               video.playbackRate = correctionSpeed;
             }
           } else if (drift > 0.3 && drift <= 0.6) {
@@ -727,9 +726,9 @@ const ProgramPreview: React.FC = () => {
           </div>
         </div>
 
-        {/* Professional empty state - shows sequence context when no clips */}
+        {/* Professional empty state - shows sequence context when no clips. Applied same width and height has canvas, so that it's always fit-in professionally*/}
         {clips.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+          <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none mx-auto" style={{ width: vw, height: vh }}>
             <div className="text-center space-y-3">
               <div className="text-sm font-medium text-text-muted">No clips in sequence</div>
               <div className="text-xs text-text-muted/80 space-y-1 font-mono">

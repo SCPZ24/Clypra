@@ -133,6 +133,45 @@ pub fn canonical_timestamp(time_secs: f64) -> u64 {
     (time_secs * 1000.0).round() as u64
 }
 
+// ─── AtlasCacheKey ─────────────────────────────────────────────────────────────
+
+/// Stable cache identity for atlas-based persistent storage.
+/// Key components: video_hash + tier + sampling_strategy + effect_graph_version
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AtlasCacheKey {
+    pub video_hash: String,
+    pub tier: SpatialTier,
+    pub sampling_strategy: String,  // e.g., "tile_width:80" or "density:medium"
+    pub effect_graph_version: u32,
+}
+
+impl AtlasCacheKey {
+    pub fn compute(
+        video_path: &str,
+        tier: SpatialTier,
+        sampling_strategy: &str,
+        effect_graph_version: u32,
+    ) -> Self {
+        let video_hash = format!("{:x}", md5::compute(video_path));
+        Self {
+            video_hash,
+            tier,
+            sampling_strategy: sampling_strategy.to_string(),
+            effect_graph_version,
+        }
+    }
+
+    pub fn as_cache_key(&self) -> String {
+        format!(
+            "{}_{}_{}_{}",
+            self.video_hash,
+            self.tier.label(),
+            self.sampling_strategy,
+            self.effect_graph_version
+        )
+    }
+}
+
 // ─── TierCacheKey ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -848,7 +848,7 @@ export const Timeline: React.FC = () => {
 
         <div ref={containerRef} onScroll={handleScroll} onClick={seekFromPointer} id="timeline-tracks-container" className={`flex-1 overflow-x-auto overflow-y-auto scrollbar-thin px-1 relative transition-colors border-l border-[#2b3442] ${isDraggingOver ? "bg-cyan-500/10 ring-2 ring-cyan-500/50 ring-inset" : ""}`}>
           {/* Minimal empty state hint - brutally subtle, preserves workspace identity */}
-          {clips.length === 0 && <div className="absolute bottom-3 left-3 text-[10px] text-text-muted/40 pointer-events-none font-mono">Drop media here • I to import</div>}
+          {clips.length === 0 && <div className="absolute bottom-3 left-3 text-[10px] text-white pointer-events-none font-mono">Drop media here • I to import</div>}
 
           <div
             style={{
@@ -873,7 +873,7 @@ export const Timeline: React.FC = () => {
                 />
               )}
 
-              {tracks.map((track, index) => (
+              {tracks.map((track) => (
                 <React.Fragment key={track.id}>
                   <Track
                     track={track}
