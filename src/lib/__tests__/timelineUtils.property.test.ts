@@ -1,6 +1,6 @@
 import { describe, it } from "vitest";
 import fc from "fast-check";
-import { DensityLevel } from "@types";
+import { DensityLevel } from "@/types";
 import { DENSITY_CONFIGS, generateTimestampGrid, getDensityForZoom } from "../timelineUtils";
 
 type ResolutionTier = "1x" | "2x";
@@ -23,6 +23,8 @@ function densityLabel(density: DensityLevel): "low" | "medium" | "high" | "ultra
       return "high";
     case DensityLevel.Ultra:
       return "ultra";
+    default:
+      return "low";
   }
 }
 

@@ -2,7 +2,7 @@ import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { Track } from "../Track";
-import { useUIStore } from "@@store/uiStore";
+import { useUIStore } from "@/store/uiStore";
 
 const addClipFromAsset = vi.fn();
 const getMediaAsset = vi.fn(() => ({ id: "asset-1", name: "Clip A", type: "video", duration: 5, path: "/a", size: 1 }));
@@ -12,7 +12,7 @@ vi.mock("react-dnd", () => ({
   useDrag: () => [{ isDragging: false }, () => undefined],
 }));
 
-vi.mock("@@hooks/useTimeline", () => ({
+vi.mock("@/hooks/useTimeline", () => ({
   useTimeline: () => ({
     addClipFromAsset,
     getMediaAsset,

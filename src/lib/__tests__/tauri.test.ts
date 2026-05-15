@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { normalizePathForTauriInvoke, decodeFrame, decodeFramesStreaming, releaseVideoDecoder } from "../tauri";
-import { DensityLevel } from "@types";
+import { DensityLevel } from "@/types";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 

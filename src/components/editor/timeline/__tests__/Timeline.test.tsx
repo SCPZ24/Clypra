@@ -2,9 +2,9 @@ import React from "react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Timeline } from "../Timeline";
-import { useTimelineStore } from "@@store/timelineStore";
-import { useProjectStore } from "@@store/projectStore";
-import { useUIStore } from "@@store/uiStore";
+import { useTimelineStore } from "@/store/timelineStore";
+import { useProjectStore } from "@/store/projectStore";
+import { useUIStore } from "@/store/uiStore";
 
 const seekMock = vi.fn();
 const setDurationMock = vi.fn();
