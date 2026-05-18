@@ -25,7 +25,7 @@ export const EditorScreen: React.FC = () => {
   return (
     <ErrorBoundary>
       <DndProvider backend={HTML5Backend}>
-        <div className="w-full h-full p-1.5 overflow-hidden">
+        <div className="w-full h-full overflow-hidden">
           <EditorLayout />
           <SuccessToast message={toastMessage || shortcutToast} variant={toastMessage ? toastVariant : "success"} />
         </div>
