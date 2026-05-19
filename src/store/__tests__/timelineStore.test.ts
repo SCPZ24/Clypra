@@ -378,7 +378,7 @@ describe("timelineStore clip operations", () => {
     });
   });
 
-  describe("beginBatch / endBatch", () => {
+  describe("withBatch", () => {
     beforeEach(() => {
       const { addClip } = useTimelineStore.getState();
       addClip({ id: "c1", trackId: "t1", mediaId: "m1", startTime: 0, duration: 2, trimIn: 0, trimOut: 2, x: 0, y: 0, width: 100, height: 100, opacity: 1, rotation: 0 });
@@ -387,44 +387,47 @@ describe("timelineStore clip operations", () => {
       useTimelineStore.setState({ epoch: 0 });
     });
 
-    it("defers epoch increment until endBatch", () => {
-      const { beginBatch, endBatch, updateClip } = useTimelineStore.getState();
+    it("defers epoch increment until batch completes", () => {
+      const { withBatch, updateClip } = useTimelineStore.getState();
 
-      beginBatch();
-      updateClip("c1", { startTime: 1 });
-      updateClip("c2", { startTime: 4 });
+      withBatch(() => {
+        updateClip("c1", { startTime: 1 });
+        updateClip("c2", { startTime: 4 });
 
-      // Epoch should NOT have incremented yet
-      expect(useTimelineStore.getState().epoch).toBe(0);
-
-      endBatch();
+        // Epoch should NOT have incremented yet (still in batch)
+        expect(useTimelineStore.getState().epoch).toBe(0);
+      });
 
       // Single epoch increment after batch
       expect(useTimelineStore.getState().epoch).toBe(1);
     });
 
     it("does not increment epoch if no mutations in batch", () => {
-      const { beginBatch, endBatch } = useTimelineStore.getState();
+      const { withBatch } = useTimelineStore.getState();
 
-      beginBatch();
-      endBatch();
+      withBatch(() => {
+        // No mutations
+      });
 
       expect(useTimelineStore.getState().epoch).toBe(0);
     });
 
     it("supports nested batches", () => {
-      const { beginBatch, endBatch, updateClip } = useTimelineStore.getState();
+      const { withBatch, updateClip } = useTimelineStore.getState();
 
-      beginBatch();
-      updateClip("c1", { startTime: 1 });
-      beginBatch(); // nested
-      updateClip("c2", { startTime: 4 });
-      endBatch(); // inner
+      withBatch(() => {
+        updateClip("c1", { startTime: 1 });
+        withBatch(() => {
+          // nested
+          updateClip("c2", { startTime: 4 });
+          // Still inside outer batch — no epoch yet
+          expect(useTimelineStore.getState().epoch).toBe(0);
+        });
+        // Still inside outer batch — no epoch yet
+        expect(useTimelineStore.getState().epoch).toBe(0);
+      });
 
-      // Still inside outer batch — no epoch yet
-      expect(useTimelineStore.getState().epoch).toBe(0);
-
-      endBatch(); // outer
+      // After outer batch completes, epoch increments
       expect(useTimelineStore.getState().epoch).toBe(1);
     });
 

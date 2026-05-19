@@ -19,6 +19,43 @@ import type { EvaluatedScene, EvaluatedMediaLayer, EvaluatedTextLayer } from "..
 import { getResourceCache } from "../resources/ResourceCache";
 
 /**
+ * Global pool for OffscreenCanvas to prevent GC stalls during rendering/export.
+ */
+class OffscreenCanvasPool {
+  private canvases: OffscreenCanvas[] = [];
+  private maxPoolSize = 5;
+
+  acquire(width: number, height: number): OffscreenCanvas {
+    let canvas: OffscreenCanvas;
+    if (this.canvases.length > 0) {
+      canvas = this.canvases.pop()!;
+      // Only resize if necessary
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+    } else {
+      if (typeof OffscreenCanvas !== "undefined") {
+        canvas = new OffscreenCanvas(width, height);
+      } else {
+        canvas = document.createElement("canvas") as any as OffscreenCanvas;
+        canvas.width = width;
+        canvas.height = height;
+      }
+    }
+    return canvas;
+  }
+
+  release(canvas: OffscreenCanvas) {
+    if (this.canvases.length < this.maxPoolSize) {
+      this.canvases.push(canvas);
+    }
+  }
+}
+
+const canvasPool = new OffscreenCanvasPool();
+
+/**
  * Raster target configuration.
  * Defines the output framebuffer properties.
  */
@@ -63,6 +100,9 @@ export interface RasterFrame {
 
   /** Rasterization time in ms */
   rasterTimeMs: number;
+
+  /** Release the canvas back to the pool (if applicable) */
+  releaseCanvas?: () => void;
 }
 
 /**
@@ -81,12 +121,16 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
 
   const { width, height, pixelRatio = 1, colorSpace = "srgb", backgroundColor = "#000000" } = target;
 
-  // Create or reuse canvas
-  const outputCanvas = canvas || (typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(width * pixelRatio, height * pixelRatio) : document.createElement("canvas"));
+  const targetWidth = width * pixelRatio;
+  const targetHeight = height * pixelRatio;
 
-  if (!canvas) {
-    outputCanvas.width = width * pixelRatio;
-    outputCanvas.height = height * pixelRatio;
+  // Create or reuse canvas
+  const isPooledCanvas = !canvas;
+  const outputCanvas = canvas || canvasPool.acquire(targetWidth, targetHeight);
+
+  if (!isPooledCanvas && (outputCanvas.width !== targetWidth || outputCanvas.height !== targetHeight)) {
+    outputCanvas.width = targetWidth;
+    outputCanvas.height = targetHeight;
   }
 
   const ctx = outputCanvas.getContext("2d", {
@@ -96,6 +140,12 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
 
   if (!ctx) {
     throw new Error("Failed to get 2D context");
+  }
+
+  // Reset transform on every frame (critical when reusing pooled canvases).
+  // Without this, ctx.scale() accumulates across frames and can push all drawing off-screen.
+  if ("setTransform" in ctx) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   // Scale for pixel ratio
@@ -108,24 +158,45 @@ export async function rasterizeScene(scene: EvaluatedScene, target: RasterTarget
   ctx.fillRect(0, 0, width, height);
 
   // Calculate scale factors (target size / scene size)
+  // Use uniform scaling to preserve aspect ratio
   const scaleX = width / scene.metadata.canvasWidth;
   const scaleY = height / scene.metadata.canvasHeight;
+  const scale = Math.min(scaleX, scaleY); // Uniform scale (letterbox if needed)
 
-  // Rasterize all visual layers
+  // Calculate letterbox/pillarbox offsets to center content
+  const scaledCanvasWidth = scene.metadata.canvasWidth * scale;
+  const scaledCanvasHeight = scene.metadata.canvasHeight * scale;
+  const offsetX = (width - scaledCanvasWidth) / 2;
+  const offsetY = (height - scaledCanvasHeight) / 2;
+
+  // Apply centering offset
+  ctx.save();
+  ctx.translate(offsetX, offsetY);
+
+  // Rasterize all visual layers with uniform scaling
   for (const layer of scene.visualLayers) {
-    await rasterizeLayer(ctx, layer, scaleX, scaleY, target);
+    await rasterizeLayer(ctx, layer, scale, scale, target);
   }
+
+  ctx.restore();
 
   const rasterTimeMs = performance.now() - startTime;
 
+  // Caller must invoke releaseCanvas() after extracting ImageBitmap/ImageData
+  // to return the pooled OffscreenCanvas for reuse.
   return {
     canvas: outputCanvas,
     ctx,
     width,
     height,
-    scaleX,
-    scaleY,
+    scaleX: scale,
+    scaleY: scale,
     rasterTimeMs,
+    releaseCanvas: () => {
+      if (isPooledCanvas && outputCanvas instanceof OffscreenCanvas) {
+        canvasPool.release(outputCanvas);
+      }
+    },
   };
 }
 
@@ -169,16 +240,34 @@ async function rasterizeLayer(ctx: CanvasRenderingContext2D | OffscreenCanvasRen
  * Rasterize a media layer.
  * Uses pre-resolved resources when available.
  */
+
+/** Throttle state for video element warnings (prevent log flood at 60fps). */
+let _lastVideoWarnTime = 0;
+const VIDEO_WARN_INTERVAL_MS = 5000;
+
 async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, layer: EvaluatedMediaLayer, width: number, height: number, target: RasterTarget): Promise<void> {
   try {
     // 1. Try to use active video element (bypasses decoding)
     if (layer.mediaType === "video" && target.videoElements) {
       const key = `${layer.clipId}-${layer.mediaId}`;
       const video = target.videoElements.get(key);
-      if (video && video.readyState >= 2) {
-        // HAVE_CURRENT_DATA
-        ctx.drawImage(video, -width / 2, -height / 2, width, height);
+
+      if (video) {
+        if (video.readyState >= 2) {
+          // HAVE_CURRENT_DATA — element is loaded, draw it
+          ctx.drawImage(video, -width / 2, -height / 2, width, height);
+          return;
+        }
+        // Element exists but still loading — draw silent placeholder (no error)
+        drawLoadingPlaceholder(ctx, width, height);
         return;
+      } else {
+        // Only log warning occasionally to avoid spam
+        const now = performance.now();
+        if (now - _lastVideoWarnTime > VIDEO_WARN_INTERVAL_MS) {
+          _lastVideoWarnTime = now;
+          console.warn(`[Rasterizer] No video element for clip ${layer.clipId}`);
+        }
       }
     }
 
@@ -196,6 +285,19 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
 
     // Fallback: load on-demand (legacy path, should be avoided)
     if (!imageBitmap) {
+      if (layer.mediaType === "video") {
+        // Cannot decode video without video element — draw placeholder silently
+        // Throttle the warning to prevent log flood at 60fps
+        const now = performance.now();
+        if (now - _lastVideoWarnTime > VIDEO_WARN_INTERVAL_MS) {
+          _lastVideoWarnTime = now;
+          console.warn(`[Rasterizer] No video element for clip ${layer.clipId} — video pool may not have synced yet`);
+        }
+        drawLoadingPlaceholder(ctx, width, height);
+        return;
+      }
+
+      // Only attempt fetch for images
       const response = await fetch(layer.sourcePath);
       const blob = await response.blob();
       imageBitmap = await createImageBitmap(blob);
@@ -209,7 +311,7 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
       imageBitmap.close();
     }
   } catch (error) {
-    // Fallback: draw placeholder
+    // Fallback: draw error placeholder
     ctx.fillStyle = "#1a1a1a";
     ctx.fillRect(-width / 2, -height / 2, width, height);
 
@@ -217,7 +319,30 @@ async function rasterizeMediaLayer(ctx: CanvasRenderingContext2D | OffscreenCanv
     ctx.strokeStyle = "#ff4444";
     ctx.lineWidth = 2;
     ctx.strokeRect(-width / 2, -height / 2, width, height);
+
+    // Draw error text
+    ctx.save();
+    ctx.fillStyle = "#ff4444";
+    ctx.font = "14px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Media decode error", 0, -10);
+    ctx.font = "10px monospace";
+    ctx.fillStyle = "#ff8888";
+    ctx.fillText(layer.mediaType === "video" ? "Missing video element" : "Load failed", 0, 10);
+    ctx.restore();
+
+    console.error(`[Rasterizer] Failed to render media layer:`, error);
   }
+}
+
+/**
+ * Draw a non-alarming loading placeholder (dark frame with spinner indicator).
+ * Used when a video element exists but hasn't loaded yet, or during pool sync.
+ */
+function drawLoadingPlaceholder(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, width: number, height: number): void {
+  ctx.fillStyle = "#0a0a0a";
+  ctx.fillRect(-width / 2, -height / 2, width, height);
 }
 
 /**

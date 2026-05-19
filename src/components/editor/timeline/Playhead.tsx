@@ -6,9 +6,10 @@ interface PlayheadProps {
   pixelsPerSecond: number;
   duration: number;
   containerRef: RefObject<HTMLDivElement | null>;
+  rulerHeight?: number;
 }
 
-export const Playhead: React.FC<PlayheadProps> = ({ pixelsPerSecond, duration, containerRef }) => {
+export const Playhead: React.FC<PlayheadProps> = ({ pixelsPerSecond, duration, containerRef, rulerHeight = 24 }) => {
   const clockState = usePlaybackClock();
   const { seek } = usePlaybackControls();
   const { setScrollLeft } = useTimelineStore();
@@ -19,6 +20,10 @@ export const Playhead: React.FC<PlayheadProps> = ({ pixelsPerSecond, duration, c
   const pointerIdRef = useRef<number | null>(null);
   const pointerXRef = useRef(0); // Pointer position in viewport space
   const dragOffsetRef = useRef(0); // Offset captured at drag start for smooth anchor
+  const clearDragCursorLock = () => {
+    document.body.style.userSelect = "";
+    document.body.classList.remove("cursor-lock-col");
+  };
 
   const currentTime = clockState.time;
 
@@ -120,8 +125,7 @@ export const Playhead: React.FC<PlayheadProps> = ({ pixelsPerSecond, duration, c
         setIsDragging(false);
         scrollVelocityRef.current = 0;
         pointerIdRef.current = null;
-        document.body.style.userSelect = "";
-        document.body.classList.remove("cursor-lock-ew");
+        clearDragCursorLock();
 
         // Release pointer capture if it was set
         if (playheadRef.current) {
@@ -139,26 +143,44 @@ export const Playhead: React.FC<PlayheadProps> = ({ pixelsPerSecond, duration, c
       setIsDragging(false);
       scrollVelocityRef.current = 0;
       pointerIdRef.current = null;
-      document.body.style.userSelect = "";
-      document.body.classList.remove("cursor-lock-ew");
+      clearDragCursorLock();
+    };
+
+    const handlePointerCancel = (e: PointerEvent) => {
+      if (pointerIdRef.current !== null && e.pointerId !== pointerIdRef.current) return;
+      setIsDragging(false);
+      scrollVelocityRef.current = 0;
+      pointerIdRef.current = null;
+      clearDragCursorLock();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setIsDragging(false);
+        scrollVelocityRef.current = 0;
+        pointerIdRef.current = null;
+        clearDragCursorLock();
+      }
     };
 
     // Prevent text selection during drag
     document.body.style.userSelect = "none";
-    document.body.classList.add("cursor-lock-ew");
+    document.body.classList.add("cursor-lock-col");
 
     // ✅ Use GLOBAL pointer events (not element-bound)
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
     window.addEventListener("blur", handleWindowBlur);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
       window.removeEventListener("blur", handleWindowBlur);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      document.body.classList.remove("cursor-lock-ew");
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearDragCursorLock();
       scrollVelocityRef.current = 0;
     };
   }, [isDragging, containerRef]);
@@ -205,36 +227,59 @@ export const Playhead: React.FC<PlayheadProps> = ({ pixelsPerSecond, duration, c
       ref={playheadRef}
       data-playhead="true"
       data-timeline-interactive="true"
-      className={`absolute inset-y-0 select-none cursor-timeline-ew pointer-events-none ${isDragging ? "cursor-timeline-ew-grabbing" : ""}`}
+      className="absolute inset-y-0 select-none pointer-events-none"
       style={{
         left: `${left}px`,
         width: "8px",
         marginLeft: "-3px",
         zIndex: 100,
-        touchAction: "none", // Prevent default touch behaviors
+        touchAction: "none",
       }}
-      onPointerDown={handlePointerDown}
+      onLostPointerCapture={() => {
+        setIsDragging(false);
+        scrollVelocityRef.current = 0;
+        pointerIdRef.current = null;
+        clearDragCursorLock();
+      }}
       onClick={(e) => e.stopPropagation()}
     >
       {/* Visual line */}
       <div
-        className="absolute inset-y-0 left-1/2 -translate-x-1/2 pointer-events-auto bg-accent"
+        className="absolute inset-y-0 left-1/2 -translate-x-1/2 pointer-events-none bg-accent"
         style={{
           width: "2px",
           boxShadow: "0 0 0 1px rgba(0,0,0,0.25)",
+          cursor: "default",
         }}
       />
 
       {/* Circle handle at top */}
       <div
         className="absolute rounded-full pointer-events-auto bg-accent"
+        onPointerDown={handlePointerDown}
+        onClick={(e) => e.stopPropagation()}
         style={{
           left: "50%",
           transform: "translateX(-50%)",
           top: "2px",
-          width: "10px",
-          height: "10px",
+          width: "12px",
+          height: "12px",
           boxShadow: "0 0 0 1px rgba(0,0,0,0.35)",
+          cursor: "col-resize",
+        }}
+      />
+
+      {/* Ruler-only drag hit target so playhead never steals clip trim handles */}
+      <div
+        className="absolute left-1/2 -translate-x-1/2 pointer-events-auto"
+        onPointerDown={handlePointerDown}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          top: 0,
+          width: "16px",
+          height: `${Math.max(12, rulerHeight)}px`,
+          cursor: "col-resize",
+          background: "transparent",
         }}
       />
     </div>

@@ -2,10 +2,13 @@ import React, { useRef, useState, useEffect, useCallback } from "react";
 import { Plus, X, RotateCcw, Play } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useUIStore } from "@/store/uiStore";
-import { useTimelineStore } from "@/store/timelineStore";
+import { getInsertIndexForNewTrack, useTimelineStore } from "@/store/timelineStore";
 import { useProjectStore } from "@/store/projectStore";
 import { createClipFromAsset } from "@/lib/timelineClip";
 import { getActiveSessionOrNull } from "@/core/runtime/ProjectSession";
+import { autoAdaptSequenceForFirstVisualClip } from "@/lib/sequenceAutoAspect";
+import { DEFAULT_PLACEMENT_POLICY, resolveAddToTimelinePlacement, resolveDefaultFitModeForAsset } from "@/lib/placementPolicy";
+import { getPlaybackClock } from "@/hooks/usePlaybackClock";
 import type { SourcePlaybackContext } from "@/core/playback";
 import { GPUPreview } from "./GPUPreview";
 import { AudioWaveform } from "./AudioWaveform";
@@ -17,8 +20,8 @@ const USE_GPU_PREVIEW = false;
 
 export const SourcePreview: React.FC = () => {
   const { sourceAsset, sourceInPoint, sourceOutPoint, exitSourceMode, markSourceIn, markSourceOut } = useUIStore();
-  const { tracks, clips, addClip, addTrack } = useTimelineStore();
-  const { project } = useProjectStore();
+  const { tracks, clips, addClip, addTrack, insertTrackAt, getTimelineEndTime } = useTimelineStore();
+  const { project, updateProject } = useProjectStore();
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -110,22 +113,38 @@ export const SourcePreview: React.FC = () => {
 
   const handleAddToTimeline = () => {
     if (!project) return;
-    const targetTrackType = sourceAsset.type === "audio" ? "audio" : "video";
-    let targetTrack = tracks.find((track) => track.type === targetTrackType && !track.locked);
-    if (!targetTrack) {
-      addTrack(targetTrackType);
-      targetTrack = useTimelineStore.getState().tracks.find((t) => t.type === targetTrackType && !t.locked);
+    const placement = resolveAddToTimelinePlacement({
+      asset: sourceAsset,
+      tracks,
+      clips,
+      playheadTime: getPlaybackClock().time,
+      sequenceEndTime: getTimelineEndTime(),
+    });
+    let targetTrackId = placement.targetTrackId;
+    if (placement.shouldCreateTrack || !targetTrackId) {
+      const latestTracks = useTimelineStore.getState().tracks;
+      const insertIndex = getInsertIndexForNewTrack(latestTracks, placement.trackType);
+      targetTrackId = insertTrackAt(placement.trackType, insertIndex);
     }
-    if (!targetTrack) return;
+    if (!targetTrackId) return;
 
-    const trackClips = clips.filter((c) => c.trackId === targetTrack.id);
-    const startTime = trackClips.length > 0 ? Math.max(...trackClips.map((c) => c.startTime + c.duration)) : 0;
+    if (DEFAULT_PLACEMENT_POLICY.autoAdaptSequenceForFirstVisualClip) {
+      autoAdaptSequenceForFirstVisualClip({
+        project,
+        existingClips: clips,
+        asset: sourceAsset,
+        updateProject,
+      });
+    }
+    const nextProject = useProjectStore.getState().project;
+
     const newClip = createClipFromAsset({
       asset: sourceAsset,
-      trackId: targetTrack.id,
-      startTime,
-      width: project.canvasWidth,
-      height: project.canvasHeight,
+      trackId: targetTrackId,
+      startTime: placement.startTime,
+      width: nextProject?.canvasWidth ?? project.canvasWidth,
+      height: nextProject?.canvasHeight ?? project.canvasHeight,
+      fitMode: resolveDefaultFitModeForAsset(sourceAsset),
     });
 
     const trimIn = sourceInPoint ?? 0;
@@ -270,7 +289,7 @@ export const SourcePreview: React.FC = () => {
               </button>
             )}
             <div className="w-px h-4 bg-white/10 mx-1" />
-            <button onClick={handleAddToTimeline} disabled={!hasCompleteMarks} className={`flex items-center gap-1 px-2.5 h-6 rounded text-[10px] font-semibold transition-colors ${hasCompleteMarks ? "bg-green-600/90 hover:bg-green-600 text-white cursor-pointer" : "bg-text-muted/70 hover:bg-text-muted/90 text-white cursor-not-allowed"}`} title={hasCompleteMarks ? `Add ${markedDuration?.toFixed(2)}s to Timeline` : "Add to Timeline"}>
+            <button onClick={handleAddToTimeline} disabled={!hasCompleteMarks} className={`flex items-center gap-1 px-2.5 h-6 rounded text-[10px] font-semibold transition-colors ${hasCompleteMarks ? "bg-green-600/90 hover:bg-green-600 text-white cursor-pointer" : "bg-text-muted/70 hover:bg-text-muted/90 text-white cursor-not-allowed"}`} title={hasCompleteMarks ? `Add ${markedDuration?.toFixed(2)}s to Timeline` : "Add to Track"}>
               <Plus className="w-3 h-3" />
               Add
             </button>

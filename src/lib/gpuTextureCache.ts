@@ -28,8 +28,10 @@ export class GPUTextureCache {
   private positionLocation: number = -1;
   private texCoordLocation: number = -1;
   private textureLocation: WebGLUniformLocation | null = null;
+  private memoryBudgetBytes: number;
+  private currentMemoryBytes: number = 0;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, memoryBudgetMB: number = 128) {
     const gl = canvas.getContext("webgl2", {
       alpha: true,
       antialias: false,
@@ -43,10 +45,10 @@ export class GPUTextureCache {
       throw new Error("WebGL2 not supported");
     }
 
-
     this.gl = gl;
     this.textures = new Map();
     this.textureMetadata = new Map();
+    this.memoryBudgetBytes = memoryBudgetMB * 1024 * 1024;
 
     // Set initial viewport (CRITICAL for rendering)
     this.gl.viewport(0, 0, canvas.width, canvas.height);
@@ -78,6 +80,13 @@ export class GPUTextureCache {
     // Check if texture already exists
     if (this.textures.has(key)) {
       return key;
+    }
+
+    const sizeBytes = width * height * 4;
+
+    // ENFORCE BUDGET BEFORE UPLOAD
+    while (this.currentMemoryBytes + sizeBytes > this.memoryBudgetBytes && this.textures.size > 0) {
+      this._evictLRU();
     }
 
     const startTime = performance.now();
@@ -129,14 +138,15 @@ export class GPUTextureCache {
       lastUsed: Date.now(),
       useCount: 0,
     });
+    this.currentMemoryBytes += sizeBytes;
 
     const uploadTime = performance.now() - startTime;
     return key;
   }
 
   /**
-   * Render texture to canvas (reuse, no upload)
-   * Simplified fullscreen rendering without matrix transforms
+   * Render texture to canvas at specified sub-rectangle (reuse, no upload).
+   * Handles letterboxing by drawing a quad that only covers the given rectangle.
    */
   renderTexture(key: string, x: number, y: number, width: number, height: number) {
     const texture = this.textures.get(key);
@@ -155,10 +165,21 @@ export class GPUTextureCache {
       return;
     }
 
-    // Update viewport if canvas size changed
     const canvasWidth = this.gl.canvas.width;
     const canvasHeight = this.gl.canvas.height;
     this.gl.viewport(0, 0, canvasWidth, canvasHeight);
+
+    // Compute clip-space bounds for the destination rectangle.
+    // Canvas pixel (0,0) is top-left; WebGL clip-space (-1,-1) is bottom-left.
+    const clipLeft = (x / canvasWidth) * 2 - 1;
+    const clipRight = ((x + width) / canvasWidth) * 2 - 1;
+    const clipTop = ((canvasHeight - y) / canvasHeight) * 2 - 1;
+    const clipBottom = ((canvasHeight - y - height) / canvasHeight) * 2 - 1;
+
+    // Build sub-rectangle quad with flipped-Y texCoords (ImageBitmap origin is top-left)
+    const vertices = new Float32Array([clipLeft, clipBottom, 0, 1, clipRight, clipBottom, 1, 1, clipLeft, clipTop, 0, 0, clipRight, clipTop, 1, 0]);
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.DYNAMIC_DRAW);
 
     // Use shader program
     this.gl.useProgram(this.program);
@@ -169,15 +190,12 @@ export class GPUTextureCache {
     this.gl.uniform1i(this.textureLocation, 0);
 
     // Set up vertex attributes
-    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
-
     this.gl.enableVertexAttribArray(this.positionLocation);
     this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, 16, 0);
 
     this.gl.enableVertexAttribArray(this.texCoordLocation);
     this.gl.vertexAttribPointer(this.texCoordLocation, 2, this.gl.FLOAT, false, 16, 8);
 
-    // Draw fullscreen quad (no matrix transform needed)
     this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
   }
 
@@ -200,12 +218,7 @@ export class GPUTextureCache {
    * Get GPU memory usage in MB
    */
   getMemoryUsageMB(): number {
-    let totalBytes = 0;
-    for (const metadata of this.textureMetadata.values()) {
-      // RGBA = 4 bytes per pixel
-      totalBytes += metadata.width * metadata.height * 4;
-    }
-    return totalBytes / (1024 * 1024);
+    return this.currentMemoryBytes / (1024 * 1024);
   }
 
   /**
@@ -221,12 +234,16 @@ export class GPUTextureCache {
     const recentTextures = Array.from(this.textureMetadata.values()).filter((m) => now - m.uploadTime < 60000); // Last 60s
     const avgUploadTime = recentTextures.length > 0 ? recentTextures.reduce((sum, m) => sum + (m.uploadTime - m.uploadTime), 0) / recentTextures.length : 0;
 
+    const budgetMB = this.memoryBudgetBytes / (1024 * 1024);
+
     return {
       textures,
       memoryMB: memoryMB.toFixed(2),
+      budgetMB,
       totalUseCount,
       avgUseCount: textures > 0 ? (totalUseCount / textures).toFixed(1) : "0",
       textureReuseRate: textures > 0 ? ((totalUseCount / textures - 1) * 100).toFixed(1) + "%" : "0%",
+      utilizationPercent: budgetMB > 0 ? ((memoryMB / budgetMB) * 100).toFixed(1) : "0.0",
     };
   }
 
@@ -261,31 +278,28 @@ export class GPUTextureCache {
   }
 
   /**
+   * Evict a single least-recently-used texture and update memory tracking.
+   */
+  private _evictLRU(): void {
+    const entries = Array.from(this.textureMetadata.entries()).sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+    if (entries.length === 0) return;
+
+    const [key, metadata] = entries[0];
+    const texture = this.textures.get(key)!;
+    this.gl.deleteTexture(texture);
+    this.textures.delete(key);
+    this.textureMetadata.delete(key);
+    this.currentMemoryBytes -= metadata.width * metadata.height * 4;
+  }
+
+  /**
    * Evict least recently used textures when GPU memory exceeds limit
    */
   evictLRU(targetMemoryMB: number) {
-    const currentMemoryMB = this.getMemoryUsageMB();
-    if (currentMemoryMB <= targetMemoryMB) {
-      return;
+    const targetBytes = targetMemoryMB * 1024 * 1024;
+    while (this.currentMemoryBytes > targetBytes && this.textures.size > 0) {
+      this._evictLRU();
     }
-
-
-    // Sort by last used time (oldest first)
-    const entries = Array.from(this.textureMetadata.entries()).sort((a, b) => a[1].lastUsed - b[1].lastUsed);
-
-    let evicted = 0;
-    for (const [key, metadata] of entries) {
-      const texture = this.textures.get(key)!;
-      this.gl.deleteTexture(texture);
-      this.textures.delete(key);
-      this.textureMetadata.delete(key);
-      evicted++;
-
-      if (this.getMemoryUsageMB() <= targetMemoryMB) {
-        break;
-      }
-    }
-
   }
 
   /**
@@ -297,6 +311,7 @@ export class GPUTextureCache {
     }
     this.textures.clear();
     this.textureMetadata.clear();
+    this.currentMemoryBytes = 0;
   }
 
   /**

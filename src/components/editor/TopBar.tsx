@@ -48,10 +48,10 @@ export const TopBar: React.FC = () => {
   return (
     <>
       {/* Native title bar area - content positioned in the title bar */}
-      <div className="h-[37px] flex items-center justify-between px-3 md:px-4 gap-3 bg-transparent" data-tauri-drag-region style={{ WebkitAppRegion: "drag" } as React.CSSProperties}>
+      <div className="h-[37px] flex items-center justify-between gap-3 bg-transparent" data-tauri-drag-region style={{ WebkitAppRegion: "drag" } as React.CSSProperties}>
         {/* Left side - starts after traffic lights */}
         <div className={`flex items-center gap-3 ${isFullscreen ? "" : "pl-16"}`} data-tauri-drag-region>
-          <Button variant="ghost" size="icon-sm" onClick={closeProject} title="Back to Home" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+          <Button variant="ghost" size="icon-sm" onClick={closeProject} title="Back to Home" style={{ WebkitAppRegion: "no-drag", cursor: "pointer" } as React.CSSProperties}>
             <Home className="w-4 h-4" />
           </Button>
           <div className="w-px h-5 bg-border/50" />
@@ -83,13 +83,13 @@ export const TopBar: React.FC = () => {
             </div>
           )}
 
-          <Button variant="ghost" size="icon-sm" onClick={handleExportFrame} disabled={isExportingFrame} title="Export Current Frame (PNG)" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+          <Button variant="ghost" size="icon-sm" onClick={handleExportFrame} disabled={isExportingFrame} title="Export Current Frame (PNG)" style={{ WebkitAppRegion: "no-drag", cursor: "pointer" } as React.CSSProperties}>
             <Camera className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={toggleSettingsModal} title="Settings" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+          <Button variant="ghost" size="icon-sm" onClick={toggleSettingsModal} title="Settings" style={{ WebkitAppRegion: "no-drag", cursor: "pointer" } as React.CSSProperties}>
             <Settings className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="default" size="sm" onClick={() => setShowExportDialog(true)} className="text-xs h-6 px-2" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+          <Button variant="default" size="sm" onClick={() => setShowExportDialog(true)} className="text-xs h-6 px-2" style={{ WebkitAppRegion: "no-drag", cursor: "pointer" } as React.CSSProperties}>
             <Upload className="w-3.5 h-3.5" />
             Export
           </Button>

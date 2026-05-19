@@ -49,14 +49,14 @@ interface TimelineStore {
   scrollLeft: number;
   pixelsPerSecond: number;
   rippleEditEnabled: boolean;
+  clipDragMode: "free" | "insert" | "ripple";
+  snapEnabled: boolean;
   /** @internal Batch nesting depth — do not read directly */
   _batchDepth: number;
   /** @internal Deferred epoch flag — do not read directly */
   _pendingEpochIncrement: boolean;
-  /** Begin a batch of mutations. Epoch increment is deferred until endBatch(). */
-  beginBatch: () => void;
-  /** End a batch. If any mutation requested an epoch increment, it fires now. */
-  endBatch: () => void;
+  /** Execute a batch of mutations safely. Epoch increment is deferred until the block completes. */
+  withBatch: (fn: () => void) => void;
   /** Increment epoch (for cache invalidation) */
   incrementEpoch: () => void;
   /** Hydrate timeline state from project load (atomic operation) */
@@ -79,6 +79,8 @@ interface TimelineStore {
   getTimelineEndTime: () => number;
   swapClips: () => { error: string | null };
   toggleRippleEdit: () => void;
+  setClipDragMode: (mode: "free" | "insert" | "ripple") => void;
+  toggleSnapEnabled: () => void;
   rippleTrimClip: (clipId: string, side: "left" | "right", deltaTime: number) => void;
   // Sequence-based operations
   insertClipAtIndex: (clipId: string, trackId: string, index: number) => void;
@@ -115,21 +117,24 @@ export const useTimelineStore = create<TimelineStore>(
     scrollLeft: 0,
     pixelsPerSecond: TIMELINE_ZOOM_DEFAULT * TIMELINE_PPS_PER_ZOOM,
     rippleEditEnabled: false,
+    clipDragMode: "free",
+    snapEnabled: true,
     _batchDepth: 0,
     _pendingEpochIncrement: false,
 
-    beginBatch: () => {
+    withBatch: (fn) => {
       set((state) => ({ _batchDepth: state._batchDepth + 1 }));
-    },
-
-    endBatch: () => {
-      set((state) => {
-        const newDepth = Math.max(0, state._batchDepth - 1);
-        if (newDepth === 0 && state._pendingEpochIncrement) {
-          return { _batchDepth: 0, _pendingEpochIncrement: false, epoch: state.epoch + 1 };
-        }
-        return { _batchDepth: newDepth };
-      });
+      try {
+        fn();
+      } finally {
+        set((state) => {
+          const newDepth = Math.max(0, state._batchDepth - 1);
+          if (newDepth === 0 && state._pendingEpochIncrement) {
+            return { _batchDepth: 0, _pendingEpochIncrement: false, epoch: state.epoch + 1 };
+          }
+          return { _batchDepth: newDepth };
+        });
+      }
     },
 
     incrementEpoch: () => {
@@ -235,7 +240,7 @@ export const useTimelineStore = create<TimelineStore>(
         // If timeline was empty, switch to program preview and seek to zero
         if (wasEmpty) {
           // Import dynamically to avoid circular dependency
-          import("../core/runtime/ProjectSession").then(({ getActiveSessionOrNull }) => {
+          import("@/core/runtime/ProjectSession").then(({ getActiveSessionOrNull }) => {
             const session = getActiveSessionOrNull();
             if (session?.transportAuthority) {
               session.transportAuthority.setActiveContext("program");
@@ -251,6 +256,7 @@ export const useTimelineStore = create<TimelineStore>(
 
         return {
           clips: [...state.clips, clip],
+          epoch: state.epoch + 1,
         };
       });
     },
@@ -262,7 +268,7 @@ export const useTimelineStore = create<TimelineStore>(
         // If removing the last clip, reset playhead to 00:00
         if (remainingClips.length === 0) {
           // Import dynamically to avoid circular dependency
-          import("../core/runtime/ProjectSession").then(({ getActiveSessionOrNull }) => {
+          import("@/core/runtime/ProjectSession").then(({ getActiveSessionOrNull }) => {
             const session = getActiveSessionOrNull();
             if (session?.transportAuthority) {
               session.transportAuthority.seek(0);
@@ -368,16 +374,25 @@ export const useTimelineStore = create<TimelineStore>(
       // Ensure left is always the leftmost clip
       const [left, right] = clipA.startTime < clipB.startTime ? [clipA, clipB] : [clipB, clipA];
 
-      const newLeftStart = left.startTime; // left clip stays at same start
-      const newRightStart = left.startTime + right.duration; // right fills left's old spot
-      const newLeftEnd = newRightStart + left.duration;
+      const newLeftStart = left.startTime; // right clip takes left's old start
+      const newRightStart = left.startTime + right.duration; // left clip follows immediately after right
+      const newLeftEnd = newLeftStart + right.duration;
+      const newRightEnd = newRightStart + left.duration;
 
-      // Collision check: does the swapped left clip overlap anything after it?
-      const trackClips = state.clips.filter((c) => c.trackId === left.trackId && c.id !== left.id && c.id !== right.id).sort((a, b) => a.startTime - b.startTime);
+      // Collision check: do the swapped clips overlap any other clips?
+      const trackClips = state.clips.filter((c) => c.trackId === left.trackId && c.id !== left.id && c.id !== right.id);
 
-      const clipAfterRight = trackClips.find((c) => c.startTime >= right.startTime);
+      // Check if either swapped clip overlaps with other clips on the track
+      const collision = trackClips.some((c) => {
+        const cEnd = c.startTime + c.duration;
+        // Check if clip C overlaps with new left position (right clip moved to left)
+        const overlapsNewLeft = Math.max(newLeftStart, c.startTime) < Math.min(newLeftEnd, cEnd);
+        // Check if clip C overlaps with new right position (left clip moved to right)
+        const overlapsNewRight = Math.max(newRightStart, c.startTime) < Math.min(newRightEnd, cEnd);
+        return overlapsNewLeft || overlapsNewRight;
+      });
 
-      if (clipAfterRight && newLeftEnd > clipAfterRight.startTime) {
+      if (collision) {
         return { error: "Not enough space to swap — clips would overlap" };
       }
 
@@ -396,6 +411,14 @@ export const useTimelineStore = create<TimelineStore>(
       set((state) => ({ rippleEditEnabled: !state.rippleEditEnabled }));
     },
 
+    setClipDragMode: (mode) => {
+      set({ clipDragMode: mode });
+    },
+
+    toggleSnapEnabled: () => {
+      set((state) => ({ snapEnabled: !state.snapEnabled }));
+    },
+
     rippleTrimClip: (clipId, side, deltaTime) => {
       const state = get();
       const clip = state.clips.find((c) => c.id === clipId);
@@ -407,15 +430,20 @@ export const useTimelineStore = create<TimelineStore>(
       // Clamp trimming to underlying media duration when available.
       // Falls back to Infinity (no cap) when the media asset cannot be resolved.
       let mediaDurationBound = Infinity;
+      let mediaType: "video" | "audio" | "image" | null = null;
       try {
         // Lazy import to avoid circular deps during store init.
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const asset = useProjectStore.getState().mediaAssets?.find((a: any) => a.id === clip.mediaId);
+        mediaType = asset?.type ?? null;
         if (asset?.duration && Number.isFinite(asset.duration) && asset.duration > 0) {
           mediaDurationBound = asset.duration;
         }
       } catch {
         // ignore; keep Infinity bound
+      }
+      if (mediaType === "image") {
+        mediaDurationBound = Math.max(mediaDurationBound, 60 * 60); // 1 hour guardrail
       }
 
       const minDuration = 0.1;

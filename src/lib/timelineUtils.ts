@@ -10,6 +10,8 @@ import { AddTrackCommand, AddClipCommand, DeleteClipCommand } from "../core/hist
 import { capitalize } from "./utils";
 import { DensityLevel as DensityLevelEnum } from "../types";
 import { createClipFromAsset } from "./timelineClip";
+import { autoAdaptSequenceForFirstVisualClip } from "./sequenceAutoAspect";
+import { DEFAULT_PLACEMENT_POLICY, resolveClipStartTime } from "./placementPolicy";
 import { generateId } from "@/lib/id";
 
 // Density configurations mapping zoom levels to extraction densities. Each configuration defines the time interval between thumbnails and the zoom range.
@@ -78,7 +80,8 @@ export function handleCreateTrackAndDrop(item: DragItem, monitor: any, insertInd
   const offset = monitor.getClientOffset();
   const containerRect = document.getElementById("timeline-tracks-container")?.getBoundingClientRect();
 
-  const startTime = offset && containerRect ? Math.max(0, (offset.x - containerRect.left + scrollLeft) / pixelsPerSecond) : 0;
+  const dropTime = offset && containerRect ? (offset.x - containerRect.left + scrollLeft) / pixelsPerSecond : 0;
+  const startTime = resolveClipStartTime({ intent: "drop", timelineEndTime: 0, dropTime });
 
   // Infer track type from what's being dropped
   const trackType: "video" | "audio" | "text" = item.type === "MEDIA_ASSET" ? (item.asset.type === "audio" ? "audio" : "video") : "video";
@@ -99,9 +102,19 @@ export function handleCreateTrackAndDrop(item: DragItem, monitor: any, insertInd
   execute(new AddTrackCommand(newTrack, insertIndex));
 
   if (item.type === "MEDIA_ASSET") {
-    const { project } = useProjectStore.getState();
-    const canvasWidth = project?.canvasWidth ?? 1920;
-    const canvasHeight = project?.canvasHeight ?? 1080;
+    const projectState = useProjectStore.getState();
+    if (DEFAULT_PLACEMENT_POLICY.autoAdaptSequenceForFirstVisualClip) {
+      autoAdaptSequenceForFirstVisualClip({
+        project: projectState.project,
+        existingClips: useTimelineStore.getState().clips,
+        asset: item.asset,
+        updateProject: projectState.updateProject,
+      });
+    }
+
+    const nextProject = useProjectStore.getState().project;
+    const canvasWidth = nextProject?.canvasWidth ?? projectState.project?.canvasWidth ?? 1920;
+    const canvasHeight = nextProject?.canvasHeight ?? projectState.project?.canvasHeight ?? 1080;
 
     // Use createClipFromAsset to preserve aspect ratio (professional behavior)
     const newClip = createClipFromAsset({
@@ -118,5 +131,45 @@ export function handleCreateTrackAndDrop(item: DragItem, monitor: any, insertInd
     // Moving existing clip to new track - use commands (enables undo/redo)
     execute(new DeleteClipCommand(item.clip.id));
     execute(new AddClipCommand({ ...item.clip, trackId: newTrack.id, startTime }));
+  }
+}
+
+// Handle dropping media assets onto existing tracks
+export function handleDropOnTrack(item: DragItem, monitor: any, trackId: string) {
+  const { pixelsPerSecond, scrollLeft } = useTimelineStore.getState();
+  const { execute } = useHistoryStore.getState();
+
+  const offset = monitor.getClientOffset();
+  const containerRect = document.getElementById("timeline-tracks-container")?.getBoundingClientRect();
+
+  const dropTime = offset && containerRect ? (offset.x - containerRect.left + scrollLeft) / pixelsPerSecond : 0;
+  const startTime = resolveClipStartTime({ intent: "drop", timelineEndTime: 0, dropTime });
+
+  if (item.type === "MEDIA_ASSET") {
+    const projectState = useProjectStore.getState();
+    if (DEFAULT_PLACEMENT_POLICY.autoAdaptSequenceForFirstVisualClip) {
+      autoAdaptSequenceForFirstVisualClip({
+        project: projectState.project,
+        existingClips: useTimelineStore.getState().clips,
+        asset: item.asset,
+        updateProject: projectState.updateProject,
+      });
+    }
+
+    const nextProject = useProjectStore.getState().project;
+    const canvasWidth = nextProject?.canvasWidth ?? projectState.project?.canvasWidth ?? 1920;
+    const canvasHeight = nextProject?.canvasHeight ?? projectState.project?.canvasHeight ?? 1080;
+
+    // Use createClipFromAsset to preserve aspect ratio (professional behavior)
+    const newClip = createClipFromAsset({
+      asset: item.asset,
+      trackId,
+      startTime,
+      width: canvasWidth,
+      height: canvasHeight,
+    });
+
+    // Use command to add clip (enables undo/redo)
+    execute(new AddClipCommand(newClip));
   }
 }

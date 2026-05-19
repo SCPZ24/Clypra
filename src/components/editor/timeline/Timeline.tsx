@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo, RefObject } from "react";
+import { useDragLayer } from "react-dnd";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -6,8 +7,10 @@ import { useTimelineStore, getInsertIndexForNewTrack } from "@/store/timelineSto
 import { useProjectStore } from "@/store/projectStore";
 import { useUIStore } from "@/store/uiStore";
 import { usePlayback } from "@/hooks/usePlayback";
-import type { VideoMetadata } from "@/types";
+import type { Clip, VideoMetadata } from "@/types";
 import { createClipFromAsset, getTimelineViewportEnd } from "@/lib/timelineClip";
+import { autoAdaptSequenceForFirstVisualClip } from "@/lib/sequenceAutoAspect";
+import { DEFAULT_PLACEMENT_POLICY, resolveClipStartTime, resolvePreferredTrackId, resolveTargetTrackType } from "@/lib/placementPolicy";
 import { useRenderRuntime } from "@/hooks/useRenderRuntime";
 import { getActiveSessionOrNull } from "@/core/runtime/ProjectSession";
 import { TIMELINE_MAX_PPS, TIMELINE_MIN_PPS } from "@/lib/timelineZoom";
@@ -18,11 +21,21 @@ import { TimelineRuler } from "./TimelineRuler";
 import { TrackList } from "./TrackList";
 import { Track } from "./Track";
 import { Playhead } from "./Playhead";
+import { EmptyTimelineDropZone } from "./EmptyTimelineDropZone";
+
+const SELECT_TRACE = import.meta.env.DEV;
+const traceSelect = (...args: unknown[]) => {
+  if (!SELECT_TRACE) return;
+  console.log("[SelectTrace][Timeline]", ...args);
+};
 
 /** Multiplier on normalized wheel delta (pixels); higher = stronger zoom per tick. */
 const WHEEL_ZOOM_SENSITIVITY = 0.006;
 /** Extra multiplier for Ctrl/⌘ + wheel zoom feel (higher = faster). */
 const WHEEL_ZOOM_SPEED_MULTIPLIER = 2.5;
+const DRAG_RENDER_EPSILON_PX = 0.25;
+const BOUNDARY_SNAP_EPSILON_PX = 2;
+const TIME_SNAP_EPSILON_SEC = 0.06;
 
 function normalizeWheelDeltaY(e: WheelEvent, viewportClientHeight: number): number {
   switch (e.deltaMode) {
@@ -86,14 +99,24 @@ function resolveTrackAtClientY(container: HTMLElement, tracks: Array<{ id: strin
 }
 
 export const Timeline: React.FC = () => {
-  const { tracks, clips, pixelsPerSecond, scrollLeft, setScrollLeft, getTimelineEndTime, addClip, addTrack, insertTrackAt, insertClipAtIndex, updateClip, normalizeTrack, removeEmptyNonMainTracks, beginBatch, endBatch } = useTimelineStore();
+  const { tracks, clips, pixelsPerSecond, scrollLeft, setScrollLeft, getTimelineEndTime, addClip, addTrack, insertTrackAt, insertClipAtIndex, updateClip, normalizeTrack, removeEmptyNonMainTracks, withBatch, clipDragMode, snapEnabled } = useTimelineStore();
 
-  const { mediaAssets, addMediaAsset } = useProjectStore();
+  const { mediaAssets, addMediaAsset, project, updateProject } = useProjectStore();
   const { previewMode, exitSourceMode, clearSelection } = useUIStore();
   const { currentTime, duration, isPlaying, seek, setDuration } = usePlayback();
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [isDraggingMedia, setIsDraggingMedia] = useState(false);
   const isProcessingDropRef = useRef(false);
+
+  // Monitor drag state from MediaTab
+  const { isDragging: isMediaDragging } = useDragLayer((monitor) => ({
+    isDragging: monitor.isDragging() && monitor.getItemType() === "MEDIA_ASSET",
+  }));
+
+  useEffect(() => {
+    setIsDraggingMedia(isMediaDragging);
+  }, [isMediaDragging]);
 
   // ── RenderRuntime event wiring ──────────────────────────────────────────────
   const runtime = useRenderRuntime();
@@ -132,6 +155,7 @@ export const Timeline: React.FC = () => {
     insertionIndex: number | null;
     gapStartTime: number | null;
     gapDuration: number | null;
+    targetStartTime: number | null;
     isInvalidPosition?: boolean; // For visual feedback
     // New track creation
     willCreateNewTrack?: boolean;
@@ -140,6 +164,18 @@ export const Timeline: React.FC = () => {
 
   const dragStateRef = useRef(dragState);
   dragStateRef.current = dragState;
+  const dragMoveRafRef = useRef<number | null>(null);
+  const dragMovePointerRef = useRef<{ clipId: string; clientX: number; clientY: number } | null>(null);
+  const dragTrackMetricsRef = useRef<
+    Map<
+      string,
+      {
+        trackClips: Clip[];
+        prefixWidths: Float64Array;
+        midpoints: Float64Array;
+      }
+    >
+  >(new Map());
 
   // ── Lookup maps: O(n) once per clip/track change, O(1) during drag ──
   const clipMapRef = useRef<Map<string, (typeof clips)[number]>>(new Map());
@@ -158,6 +194,32 @@ export const Timeline: React.FC = () => {
     trackClipsMapRef.current = tcMap;
   }, [clips, tracks]);
 
+  const buildDragTrackMetrics = useCallback((draggedClipIds: string[], pps: number) => {
+    const draggedSet = new Set(draggedClipIds);
+    const metrics = new Map<
+      string,
+      {
+        trackClips: Clip[];
+        prefixWidths: Float64Array;
+        midpoints: Float64Array;
+      }
+    >();
+
+    for (const track of useTimelineStore.getState().tracks) {
+      const trackClips = (trackClipsMapRef.current.get(track.id) ?? []).filter((c) => !draggedSet.has(c.id));
+      const prefixWidths = new Float64Array(trackClips.length + 1);
+      const midpoints = new Float64Array(trackClips.length);
+      for (let i = 0; i < trackClips.length; i++) {
+        const w = trackClips[i].duration * pps;
+        prefixWidths[i + 1] = prefixWidths[i] + w;
+        midpoints[i] = prefixWidths[i] + w / 2;
+      }
+      metrics.set(track.id, { trackClips, prefixWidths, midpoints });
+    }
+
+    dragTrackMetricsRef.current = metrics;
+  }, []);
+
   // Handle clip drag with gap engine
   const handleClipDragStart = useCallback(
     (clipId: string, startX: number, startY: number) => {
@@ -166,6 +228,8 @@ export const Timeline: React.FC = () => {
       suspendAutoSave();
       const selectedClipIds = useUIStore.getState().selectedClipIds;
       const draggedClipIds = selectedClipIds.includes(clipId) ? selectedClipIds : [clipId];
+      const pps = useTimelineStore.getState().pixelsPerSecond;
+      buildDragTrackMetrics(draggedClipIds, pps);
 
       // Find clip's index in its track
       const trackClips = trackClipsMapRef.current.get(clip.trackId) ?? [];
@@ -183,20 +247,20 @@ export const Timeline: React.FC = () => {
       }
 
       // Pack other clips to t=0.. — then move dragged clip to tail so it never shares startTime with siblings (avoids overlap in store).
-      const pps = useTimelineStore.getState().pixelsPerSecond;
       const originalLeftPx = Math.round(clip.startTime * pps);
 
       const otherClips = trackClips.filter((c) => c.id !== clipId);
-      beginBatch();
-      let currentTime = 0;
-      otherClips.forEach((c) => {
-        updateClip(c.id, { startTime: currentTime });
-        currentTime += c.duration;
-      });
+      let tailTime = 0;
+      withBatch(() => {
+        let currentTime = 0;
+        otherClips.forEach((c) => {
+          updateClip(c.id, { startTime: currentTime });
+          currentTime += c.duration;
+        });
 
-      const tailTime = currentTime;
-      updateClip(clipId, { startTime: tailTime });
-      endBatch();
+        tailTime = currentTime;
+        updateClip(clipId, { startTime: tailTime });
+      });
       const leftNewPx = Math.round(tailTime * pps);
       const visualLeftAnchorDelta = originalLeftPx - leftNewPx;
 
@@ -224,6 +288,7 @@ export const Timeline: React.FC = () => {
         insertionIndex: null as number | null,
         gapStartTime: null as number | null,
         gapDuration: null as number | null,
+        targetStartTime: null as number | null,
         isInvalidPosition: false,
         willCreateNewTrack: false,
         newTrackPosition: null as "above" | "below" | null,
@@ -231,10 +296,14 @@ export const Timeline: React.FC = () => {
       dragStateRef.current = nextDragState;
       setDragState(nextDragState);
     },
-    [updateClip, beginBatch, endBatch],
+    [buildDragTrackMetrics, updateClip, withBatch],
   );
 
-  const handleClipDragMove = useCallback((clipId: string, _deltaX: number, _deltaY: number, clientX: number, clientY: number) => {
+  const flushQueuedClipDragMove = useCallback(() => {
+    dragMoveRafRef.current = null;
+    const pointer = dragMovePointerRef.current;
+    if (!pointer) return;
+    const { clipId, clientX, clientY } = pointer;
     const ds = dragStateRef.current;
     if (!ds || ds.draggingClipId !== clipId) return;
 
@@ -247,16 +316,13 @@ export const Timeline: React.FC = () => {
     const offsetX = contentDeltaPx + ds.visualLeftAnchorDelta;
     const offsetY = clientY - ds.pointerClientYStart;
 
-    const { clips: liveClips, tracks: liveTracks, pixelsPerSecond: pps } = useTimelineStore.getState();
+    const { clips: liveClips, tracks: liveTracks } = useTimelineStore.getState();
     const clip = clipMapRef.current.get(clipId) ?? liveClips.find((c) => c.id === clipId);
     if (!clip) return;
 
     const { targetTrackId, willCreateNewTrack, newTrackPosition } = resolveTrackAtClientY(container, liveTracks, clientY);
 
-    // Helper: only trigger re-render when visual feedback fields change
-    const shouldRerender = (next: typeof ds) => ds.targetTrackId !== next.targetTrackId || ds.insertionIndex !== next.insertionIndex || ds.isInvalidPosition !== next.isInvalidPosition || ds.willCreateNewTrack !== next.willCreateNewTrack || ds.newTrackPosition !== next.newTrackPosition;
-
-    // If creating new track, show indicator and skip gap calculation
+    // If creating new track, show indicator and skip insertion calculation.
     if (willCreateNewTrack) {
       const next = {
         ...ds,
@@ -267,73 +333,116 @@ export const Timeline: React.FC = () => {
         insertionIndex: null,
         gapStartTime: null,
         gapDuration: null,
+        targetStartTime: null,
         willCreateNewTrack: true,
         newTrackPosition,
       };
+      const visualChanged = Math.abs((next.offsetX ?? 0) - (ds.offsetX ?? 0)) > DRAG_RENDER_EPSILON_PX || Math.abs((next.offsetY ?? 0) - (ds.offsetY ?? 0)) > DRAG_RENDER_EPSILON_PX;
       dragStateRef.current = next;
-      if (shouldRerender(next)) setDragState(next);
+      if (visualChanged || ds.willCreateNewTrack !== next.willCreateNewTrack || ds.newTrackPosition !== next.newTrackPosition) {
+        setDragState(next);
+      }
       return;
     }
 
-    // Check if target track is locked
     const targetTrack = liveTracks.find((t) => t.id === targetTrackId);
     const isInvalidPosition = targetTrack?.locked || false;
-
     if (isInvalidPosition) {
       const next = {
         ...ds,
         offsetX,
         offsetY,
-        isInvalidPosition,
+        isInvalidPosition: true,
         targetTrackId: null,
         insertionIndex: null,
         gapStartTime: null,
         gapDuration: null,
+        targetStartTime: null,
         willCreateNewTrack: false,
         newTrackPosition: null,
       };
+      const visualChanged = Math.abs((next.offsetX ?? 0) - (ds.offsetX ?? 0)) > DRAG_RENDER_EPSILON_PX || Math.abs((next.offsetY ?? 0) - (ds.offsetY ?? 0)) > DRAG_RENDER_EPSILON_PX;
       dragStateRef.current = next;
-      if (shouldRerender(next)) setDragState(next);
+      if (visualChanged || ds.isInvalidPosition !== next.isInvalidPosition) {
+        setDragState(next);
+      }
       return;
     }
 
     if (!targetTrackId) {
       const next = { ...ds, offsetX, offsetY };
+      const visualChanged = Math.abs((next.offsetX ?? 0) - (ds.offsetX ?? 0)) > DRAG_RENDER_EPSILON_PX || Math.abs((next.offsetY ?? 0) - (ds.offsetY ?? 0)) > DRAG_RENDER_EPSILON_PX;
       dragStateRef.current = next;
-      if (shouldRerender(next)) setDragState(next);
+      if (visualChanged) {
+        setDragState(next);
+      }
       return;
     }
 
-    const containerRect = cr;
-    // O(1) map lookup instead of O(n) filter + sort
-    const allTrackClips = trackClipsMapRef.current.get(targetTrackId) ?? [];
-    const trackClips = allTrackClips.filter((c) => c.id !== clipId);
-    const pointerX = clientX - containerRect.left + container.scrollLeft;
+    const { pixelsPerSecond: livePps, clipDragMode: dragMode, snapEnabled: snapOn } = useTimelineStore.getState();
+    const pps = Math.max(1, livePps);
+    const dragPrimaryPlacement = ds.originalPlacements[ds.draggingClipId];
+    const dragPrimaryStart = dragPrimaryPlacement?.startTime ?? 0;
+    const deltaTime = (offsetX - ds.visualLeftAnchorDelta) / pps;
+    let targetStartTime = Math.max(0, dragPrimaryStart + deltaTime);
 
-    // Build prefix sums for binary search over clip midpoints
-    const prefixWidths = new Float64Array(trackClips.length + 1);
-    for (let i = 0; i < trackClips.length; i++) {
-      prefixWidths[i + 1] = prefixWidths[i] + trackClips[i].duration * pps;
-    }
-
-    // Binary search for insertion index: find first clip whose midpoint > pointerX
-    let lo = 0;
-    let hi = trackClips.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      const clipMidpoint = prefixWidths[mid] + (trackClips[mid].duration * pps) / 2;
-      if (pointerX < clipMidpoint) {
-        hi = mid;
-      } else {
-        lo = mid + 1;
+    if (snapOn) {
+      const snapCandidates: number[] = [0, currentTime];
+      const onTrack = (trackClipsMapRef.current.get(targetTrackId) ?? []).filter((c) => c.id !== clipId);
+      for (const c of onTrack) {
+        snapCandidates.push(c.startTime, c.startTime + c.duration);
       }
+      let closest = targetStartTime;
+      let best = Infinity;
+      for (const t of snapCandidates) {
+        const d = Math.abs(t - targetStartTime);
+        if (d <= TIME_SNAP_EPSILON_SEC && d < best) {
+          best = d;
+          closest = t;
+        }
+      }
+      targetStartTime = closest;
     }
-    const insertionIndex = lo;
 
-    // Gap start time = sum of durations before insertion point
-    let gapStartTime = 0;
-    for (let i = 0; i < insertionIndex; i++) {
-      gapStartTime += trackClips[i].duration;
+    if (dragMode === "insert" || dragMode === "ripple") {
+      const trackMetrics = dragTrackMetricsRef.current.get(targetTrackId) ?? {
+        trackClips: [],
+        prefixWidths: new Float64Array(1),
+        midpoints: new Float64Array(0),
+      };
+      const pointerX = clientX - cr.left + container.scrollLeft;
+      let lo = 0;
+      let hi = trackMetrics.midpoints.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        const clipMidpoint = trackMetrics.midpoints[mid];
+        if (pointerX < clipMidpoint) hi = mid;
+        else lo = mid + 1;
+      }
+      let insertionIndex = lo;
+      const boundaryMidpoint = trackMetrics.midpoints[Math.max(0, Math.min(trackMetrics.midpoints.length - 1, insertionIndex - 1))];
+      if (Number.isFinite(boundaryMidpoint) && Math.abs(pointerX - boundaryMidpoint) <= BOUNDARY_SNAP_EPSILON_PX && ds.targetTrackId === targetTrackId && ds.insertionIndex !== null) {
+        insertionIndex = ds.insertionIndex;
+      }
+      const gapStartTime = trackMetrics.prefixWidths[Math.max(0, Math.min(trackMetrics.prefixWidths.length - 1, insertionIndex))] / pps;
+      const next = {
+        ...ds,
+        offsetX,
+        offsetY,
+        isInvalidPosition: false,
+        targetTrackId,
+        insertionIndex,
+        gapStartTime,
+        gapDuration: clip.duration,
+        targetStartTime,
+        willCreateNewTrack: false,
+        newTrackPosition: null,
+      };
+      const visualChanged = Math.abs((next.offsetX ?? 0) - (ds.offsetX ?? 0)) > DRAG_RENDER_EPSILON_PX || Math.abs((next.offsetY ?? 0) - (ds.offsetY ?? 0)) > DRAG_RENDER_EPSILON_PX;
+      const targetChanged = ds.targetTrackId !== next.targetTrackId || ds.targetStartTime !== next.targetStartTime || ds.insertionIndex !== next.insertionIndex || ds.isInvalidPosition !== next.isInvalidPosition || ds.willCreateNewTrack !== next.willCreateNewTrack || ds.newTrackPosition !== next.newTrackPosition;
+      dragStateRef.current = next;
+      if (visualChanged || targetChanged) setDragState(next);
+      return;
     }
 
     const next = {
@@ -342,42 +451,75 @@ export const Timeline: React.FC = () => {
       offsetY,
       isInvalidPosition: false,
       targetTrackId,
-      insertionIndex,
-      gapStartTime,
+      insertionIndex: null,
+      gapStartTime: targetStartTime,
       gapDuration: clip.duration,
+      targetStartTime,
       willCreateNewTrack: false,
       newTrackPosition: null,
     };
+    const visualChanged = Math.abs((next.offsetX ?? 0) - (ds.offsetX ?? 0)) > DRAG_RENDER_EPSILON_PX || Math.abs((next.offsetY ?? 0) - (ds.offsetY ?? 0)) > DRAG_RENDER_EPSILON_PX;
+    const targetChanged =
+      ds.targetTrackId !== next.targetTrackId ||
+      ds.targetStartTime !== next.targetStartTime ||
+      ds.insertionIndex !== next.insertionIndex ||
+      ds.isInvalidPosition !== next.isInvalidPosition ||
+      ds.willCreateNewTrack !== next.willCreateNewTrack ||
+      ds.newTrackPosition !== next.newTrackPosition;
     dragStateRef.current = next;
-    if (shouldRerender(next)) setDragState(next);
+    if (visualChanged || targetChanged) {
+      setDragState(next);
+    }
+  }, []);
+
+  const handleClipDragMove = useCallback((clipId: string, _deltaX: number, _deltaY: number, clientX: number, clientY: number) => {
+    const ds = dragStateRef.current;
+    if (!ds || ds.draggingClipId !== clipId) return;
+    dragMovePointerRef.current = { clipId, clientX, clientY };
+    if (dragMoveRafRef.current !== null) return;
+    dragMoveRafRef.current = requestAnimationFrame(flushQueuedClipDragMove);
+  }, [flushQueuedClipDragMove]);
+
+  const clearQueuedDragMove = useCallback(() => {
+    if (dragMoveRafRef.current !== null) {
+      cancelAnimationFrame(dragMoveRafRef.current);
+      dragMoveRafRef.current = null;
+    }
+    dragMovePointerRef.current = null;
+    dragTrackMetricsRef.current.clear();
   }, []);
 
   const handleClipDragEnd = useCallback(
     (clipId: string) => {
+      flushQueuedClipDragMove();
       const dragSnapshot = dragStateRef.current;
-      if (!dragSnapshot) return;
+      if (!dragSnapshot) {
+        clearQueuedDragMove();
+        return;
+      }
 
       const sourceTrackIds = Array.from(new Set(Object.values(dragSnapshot.originalPlacements).map((p) => p.trackId)));
       const restoreDraggedToOriginal = () => {
-        beginBatch();
-        const affectedTracks = new Set<string>();
-        dragSnapshot.draggedClipIds.forEach((id) => {
-          const placement = dragSnapshot.originalPlacements[id];
-          if (!placement) return;
-          affectedTracks.add(placement.trackId);
-          updateClip(id, {
-            trackId: placement.trackId,
-            startTime: placement.startTime,
+        withBatch(() => {
+          const affectedTracks = new Set<string>();
+          dragSnapshot.draggedClipIds.forEach((id) => {
+            const placement = dragSnapshot.originalPlacements[id];
+            if (!placement) return;
+            affectedTracks.add(placement.trackId);
+            updateClip(id, {
+              trackId: placement.trackId,
+              startTime: placement.startTime,
+            });
           });
+          affectedTracks.forEach((trackId) => normalizeTrack(trackId));
         });
-        affectedTracks.forEach((trackId) => normalizeTrack(trackId));
-        endBatch();
       };
 
       const clip = useTimelineStore.getState().clips.find((c) => c.id === clipId);
       if (!clip) {
         dragStateRef.current = null;
         setDragState(null);
+        clearQueuedDragMove();
         resumeAutoSave();
         return;
       }
@@ -400,16 +542,31 @@ export const Timeline: React.FC = () => {
           if (pa.startTime !== pb.startTime) return pa.startTime - pb.startTime;
           return a.localeCompare(b);
         });
-        orderedDragged.forEach((id, i) => insertClipAtIndex(id, newTrackId, i));
+        const baseStartTime = dragSnapshot.targetStartTime ?? 0;
+        const primaryDraggedId = dragSnapshot.draggingClipId ?? dragSnapshot.draggedClipIds[0];
+        const primaryOriginalStart = (primaryDraggedId ? dragSnapshot.originalPlacements[primaryDraggedId]?.startTime : undefined) ?? 0;
+        withBatch(() => {
+          orderedDragged.forEach((id) => {
+            const placement = dragSnapshot.originalPlacements[id];
+            if (!placement) return;
+            const relativeStartOffset = placement.startTime - primaryOriginalStart;
+            updateClip(id, {
+              trackId: newTrackId,
+              startTime: Math.max(0, baseStartTime + relativeStartOffset),
+            });
+          });
+        });
         removeEmptyNonMainTracks(sourceTrackIds);
 
         dragStateRef.current = null;
         setDragState(null);
+        clearQueuedDragMove();
         resumeAutoSave();
         return;
       }
 
-      if (dragSnapshot.targetTrackId && dragSnapshot.insertionIndex !== null) {
+      const { pixelsPerSecond: livePps, clipDragMode: dragMode } = useTimelineStore.getState();
+      if ((dragMode === "insert" || dragMode === "ripple") && dragSnapshot.targetTrackId && dragSnapshot.insertionIndex !== null) {
         const orderedDragged = [...dragSnapshot.draggedClipIds].sort((a, b) => {
           const pa = dragSnapshot.originalPlacements[a];
           const pb = dragSnapshot.originalPlacements[b];
@@ -418,60 +575,68 @@ export const Timeline: React.FC = () => {
           return a.localeCompare(b);
         });
         orderedDragged.forEach((id, i) => insertClipAtIndex(id, dragSnapshot.targetTrackId!, dragSnapshot.insertionIndex! + i));
-      } else {
-        const pps = useTimelineStore.getState().pixelsPerSecond;
-        const anchor = dragSnapshot.visualLeftAnchorDelta ?? 0;
-        const deltaTime = (dragSnapshot.offsetX - anchor) / pps;
-        const normalizedDeltaTime = Math.max(
-          deltaTime,
-          ...dragSnapshot.draggedClipIds.map((id) => {
-            const placement = dragSnapshot.originalPlacements[id];
-            return placement ? -placement.startTime : 0;
-          }),
-        );
-        beginBatch();
-        const affectedTracks = new Set<string>();
+        if (dragMode === "ripple") normalizeTrack(dragSnapshot.targetTrackId);
+        removeEmptyNonMainTracks(sourceTrackIds);
+        dragStateRef.current = null;
+        setDragState(null);
+        clearQueuedDragMove();
+        resumeAutoSave();
+        return;
+      }
+
+      const pps = livePps;
+      const anchor = dragSnapshot.visualLeftAnchorDelta ?? 0;
+      const deltaTime = (dragSnapshot.offsetX - anchor) / pps;
+      const normalizedDeltaTime = Math.max(
+        deltaTime,
+        ...dragSnapshot.draggedClipIds.map((id) => {
+          const placement = dragSnapshot.originalPlacements[id];
+          return placement ? -placement.startTime : 0;
+        }),
+      );
+      const destinationTrackId = dragSnapshot.targetTrackId;
+
+      withBatch(() => {
         dragSnapshot.draggedClipIds.forEach((id) => {
           const placement = dragSnapshot.originalPlacements[id];
           if (!placement) return;
-          affectedTracks.add(placement.trackId);
           updateClip(id, {
             startTime: Math.max(0, placement.startTime + normalizedDeltaTime),
-            trackId: placement.trackId,
+            trackId: destinationTrackId ?? placement.trackId,
           });
         });
-        affectedTracks.forEach((trackId) => normalizeTrack(trackId));
-        endBatch();
-      }
+      });
       removeEmptyNonMainTracks(sourceTrackIds);
 
       dragStateRef.current = null;
       setDragState(null);
+      clearQueuedDragMove();
       resumeAutoSave();
     },
-    [insertClipAtIndex, updateClip, insertTrackAt, normalizeTrack, removeEmptyNonMainTracks, beginBatch, endBatch],
+    [flushQueuedClipDragMove, clearQueuedDragMove, updateClip, insertTrackAt, insertClipAtIndex, normalizeTrack, removeEmptyNonMainTracks, withBatch],
   );
 
   // Handle ESC key to cancel drag
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      clearQueuedDragMove();
       const ds = dragStateRef.current;
       if (!ds) return;
 
-      beginBatch();
-      const affectedTracks = new Set<string>();
-      ds.draggedClipIds.forEach((id) => {
-        const placement = ds.originalPlacements[id];
-        if (!placement) return;
-        affectedTracks.add(placement.trackId);
-        updateClip(id, {
-          trackId: placement.trackId,
-          startTime: placement.startTime,
+      withBatch(() => {
+        const affectedTracks = new Set<string>();
+        ds.draggedClipIds.forEach((id) => {
+          const placement = ds.originalPlacements[id];
+          if (!placement) return;
+          affectedTracks.add(placement.trackId);
+          updateClip(id, {
+            trackId: placement.trackId,
+            startTime: placement.startTime,
+          });
         });
+        affectedTracks.forEach((trackId) => normalizeTrack(trackId));
       });
-      affectedTracks.forEach((trackId) => normalizeTrack(trackId));
-      endBatch();
 
       dragStateRef.current = null;
       setDragState(null);
@@ -480,7 +645,7 @@ export const Timeline: React.FC = () => {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [normalizeTrack, updateClip, beginBatch, endBatch]);
+  }, [clearQueuedDragMove, normalizeTrack, updateClip, withBatch]);
 
   // Handle Delete/Backspace key to remove selected clips
   useEffect(() => {
@@ -503,21 +668,22 @@ export const Timeline: React.FC = () => {
 
       // Remove each selected clip (batched — single epoch increment)
       const store = useTimelineStore.getState();
-      const { removeClip, normalizeTrack, beginBatch: batchStart, endBatch: batchEnd } = store;
+      const { removeClip, normalizeTrack, removeEmptyNonMainTracks, withBatch } = store;
       const affectedTracks = new Set<string>();
 
-      batchStart();
-      selectedClipIds.forEach((clipId) => {
-        const clip = store.clips.find((c) => c.id === clipId);
-        if (clip) {
-          affectedTracks.add(clip.trackId);
-          removeClip(clipId);
-        }
-      });
+      withBatch(() => {
+        selectedClipIds.forEach((clipId) => {
+          const clip = store.clips.find((c) => c.id === clipId);
+          if (clip) {
+            affectedTracks.add(clip.trackId);
+            removeClip(clipId);
+          }
+        });
 
-      // Normalize affected tracks to close gaps
-      affectedTracks.forEach((trackId) => normalizeTrack(trackId));
-      batchEnd();
+        // Normalize affected tracks to close gaps
+        affectedTracks.forEach((trackId) => normalizeTrack(trackId));
+        removeEmptyNonMainTracks(Array.from(affectedTracks));
+      });
 
       // Clear selection after deletion
       useUIStore.getState().clearSelection();
@@ -527,18 +693,24 @@ export const Timeline: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Clicking anywhere that is not a clip clears clip selection.
   useEffect(() => {
-    const handleWindowPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return;
-      const target = event.target as HTMLElement | null;
-      if (!target) return;
-      if (target.closest('[data-timeline-interactive="true"]')) return;
-      useUIStore.getState().clearSelection();
+    return () => {
+      clearQueuedDragMove();
     };
+  }, [clearQueuedDragMove]);
 
-    window.addEventListener("pointerdown", handleWindowPointerDown);
-    return () => window.removeEventListener("pointerdown", handleWindowPointerDown);
+  const handleTimelinePointerDownCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    if (dragStateRef.current?.draggingClipId) return;
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('[data-timeline-interactive="true"]')) return;
+    traceSelect("timeline pointerdown -> clearSelection", {
+      target: target.tagName,
+      className: target.className,
+      selectedBefore: useUIStore.getState().selectedClipIds,
+    });
+    useUIStore.getState().clearSelection();
   }, []);
 
   // ✅ CRITICAL SEPARATION: Viewport extent vs Sequence duration
@@ -674,6 +846,9 @@ export const Timeline: React.FC = () => {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    // Editing actions (trim/delete/split) must not move the viewport.
+    // Auto-follow is playback-only.
+    if (!isPlaying) return;
 
     // ✅ 1. Use DOM truth for all measurements
     const viewportWidth = container.clientWidth;
@@ -693,7 +868,7 @@ export const Timeline: React.FC = () => {
     if (isAtAbsoluteEnd) {
       // Force scroll to absolute maximum when at the end
       newScrollLeft = maxScrollLeft;
-    } else if (isPlaying) {
+    } else {
       // ✅ 5. Jump logic during playback: when playhead reaches 90% of viewport, jump forward
       const bufferPx = viewportWidth * 0.1;
       const rightEdge = newScrollLeft + viewportWidth;
@@ -735,7 +910,10 @@ export const Timeline: React.FC = () => {
 
   const handleTauriFileDrop = useCallback(
     async (paths: string[]) => {
-      const dropTime = getTimelineEndTime();
+      const dropTime = resolveClipStartTime({
+        intent: "timeline_end",
+        timelineEndTime: getTimelineEndTime(),
+      });
 
       for (const filePath of paths) {
         try {
@@ -778,23 +956,32 @@ export const Timeline: React.FC = () => {
           }
 
           // Add clip to timeline at end
-          const targetTrackType = asset.type === "audio" ? "audio" : "video";
-          let targetTrack = tracks.find((t) => t.type === targetTrackType && !t.locked);
+          const targetTrackType = resolveTargetTrackType(asset);
+          let targetTrackId = resolvePreferredTrackId({ tracks: useTimelineStore.getState().tracks, asset });
 
           // If no track exists for this type, create one
-          if (!targetTrack) {
+          if (!targetTrackId) {
             addTrack(targetTrackType);
-            // Get the newly created track
-            targetTrack = useTimelineStore.getState().tracks.find((t) => t.type === targetTrackType && !t.locked);
+            targetTrackId = resolvePreferredTrackId({ tracks: useTimelineStore.getState().tracks, asset });
           }
 
-          if (targetTrack) {
+          if (targetTrackId) {
+            if (DEFAULT_PLACEMENT_POLICY.autoAdaptSequenceForFirstVisualClip) {
+              autoAdaptSequenceForFirstVisualClip({
+                project,
+                existingClips: clips,
+                asset,
+                updateProject,
+              });
+            }
+            const nextProject = useProjectStore.getState().project;
+
             const newClip = createClipFromAsset({
               asset,
-              trackId: targetTrack.id,
+              trackId: targetTrackId,
               startTime: dropTime,
-              width: useProjectStore.getState().project?.canvasWidth || 1920,
-              height: useProjectStore.getState().project?.canvasHeight || 1080,
+              width: nextProject?.canvasWidth || project?.canvasWidth || 1920,
+              height: nextProject?.canvasHeight || project?.canvasHeight || 1080,
             });
 
             addClip(newClip);
@@ -805,7 +992,7 @@ export const Timeline: React.FC = () => {
         }
       }
     },
-    [mediaAssets, addMediaAsset, tracks, getTimelineEndTime, addClip, addTrack],
+    [mediaAssets, addMediaAsset, tracks, clips, project, updateProject, getTimelineEndTime, addClip, addTrack],
   );
 
   // Listen for drag events and handle file drops
@@ -894,15 +1081,19 @@ export const Timeline: React.FC = () => {
 
   return (
     <div className="h-80 flex flex-col select-none bg-[#141920] relative">
-      {/* Disabled overlay when timeline is empty */}
-      {clips.length === 0 && <div className="absolute inset-0 bg-black/40 z-300 backdrop-blur-[0.5px] pointer-events-auto"></div>}
-
       <TimelineToolbar />
 
       <div className="flex-1 flex overflow-hidden">
         {clips.length > 0 && <TrackList />}
 
-        <div ref={containerRef} onScroll={handleScroll} onClick={seekFromPointer} id="timeline-tracks-container" className={`flex-1 overflow-x-auto overflow-y-auto scrollbar-thin px-1 relative transition-colors border-l border-[#2b3442] ${isDraggingOver ? "bg-cyan-500/10 ring-2 ring-cyan-500/50 ring-inset" : ""}`}>
+        <div
+          ref={containerRef}
+          onScroll={handleScroll}
+          onPointerDownCapture={handleTimelinePointerDownCapture}
+          onClick={seekFromPointer}
+          id="timeline-tracks-container"
+          className={`flex-1 overflow-x-auto overflow-y-auto scrollbar-thin px-1 relative transition-colors border-l border-[#2b3442] ${isDraggingOver ? "bg-cyan-500/10 ring-2 ring-cyan-500/50 ring-inset" : ""}`}
+        >
           {/* Minimal empty state hint - brutally subtle, preserves workspace identity */}
           {clips.length === 0 && <div className="absolute top-1/2 left-3 text-xl text-white pointer-events-none font-mono">Drop media here • I to import</div>}
 
@@ -916,7 +1107,9 @@ export const Timeline: React.FC = () => {
             <TimelineRuler pixelsPerSecond={pixelsPerSecond} scrollLeft={scrollLeft} />
 
             <div className="relative flex-1 flex flex-col min-h-0">
-              {clips.length > 0 && (
+              {clips.length === 0 ? (
+                <EmptyTimelineDropZone isDragging={isDraggingMedia} />
+              ) : (
                 <>
                   {/* New track indicator - above all tracks */}
                   {dragState?.willCreateNewTrack && dragState?.newTrackPosition === "above" && (
@@ -971,7 +1164,7 @@ export const Timeline: React.FC = () => {
                     />
                   )}
 
-                  <Playhead pixelsPerSecond={pixelsPerSecond} duration={duration} containerRef={containerRef} />
+                  <Playhead pixelsPerSecond={pixelsPerSecond} duration={duration} containerRef={containerRef} rulerHeight={24} />
                 </>
               )}
             </div>

@@ -96,6 +96,13 @@ export interface MediaAsset {
   height?: number;
   posterFrame?: string;
   coverArt?: string; // Album artwork for audio files
+  /** Optional non-destructive visual content bounds inside the raster source. */
+  contentBounds?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
   size: number;
 }
 
@@ -113,6 +120,11 @@ export interface Clip {
   height: number;
   opacity: number;
   rotation: number;
+  // Transform constraints
+  aspectRatioLocked?: boolean; // Default true for video/images
+  sourceAspectRatio?: number; // Original aspect ratio (width/height)
+  /** Placement fit mode used for deterministic reset/re-fit behavior. */
+  fitMode?: "contain" | "cover" | "fill" | "stretch" | "original";
 }
 
 export interface TextClip extends Clip {
@@ -134,3 +146,36 @@ export interface TextClip extends Clip {
 }
 
 export type DragItem = { type: "MEDIA_ASSET"; asset: MediaAsset } | { type: "CLIP"; clip: Clip };
+
+// Transform system types
+export type TransformHandle = "move" | "nw" | "n" | "ne" | "w" | "e" | "sw" | "s" | "se" | "rotate";
+
+export interface TransformState {
+  clipId: string;
+  handle: TransformHandle;
+  startTransform: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation: number;
+  };
+  startMousePos: {
+    x: number;
+    y: number;
+  };
+  aspectRatioLocked: boolean;
+  sourceAspectRatio: number;
+}
+
+export interface TransformConstraints {
+  aspectRatioLocked: boolean;
+  minWidth: number;
+  minHeight: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  canvasWidth: number;
+  canvasHeight: number;
+  snapToGrid?: boolean;
+  snapThreshold?: number;
+}

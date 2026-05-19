@@ -26,7 +26,13 @@
  */
 
 import { create } from "zustand";
-import type { MediaAsset } from "@/types";
+import type { MediaAsset, TransformState } from "@/types";
+
+const SELECT_TRACE = import.meta.env.DEV;
+const traceSelect = (...args: unknown[]) => {
+  if (!SELECT_TRACE) return;
+  console.log("[SelectTrace][UIStore]", ...args);
+};
 
 interface UIStore {
   selectedClipIds: string[]; // Multi-select support
@@ -44,6 +50,17 @@ interface UIStore {
   sourceInPoint: number | null;
   sourceOutPoint: number | null;
 
+  // Transform tool state
+  activeTransform: TransformState | null;
+  transformMode: "select" | "transform" | null;
+
+  // Preview viewport state (editor-only, NOT exported)
+  previewViewport: {
+    zoom: number; // 0.1 to 5.0 (10% to 500%)
+    panX: number; // Screen space offset (pixels)
+    panY: number; // Screen space offset (pixels)
+  };
+
   selectClip: (clipId: string | null) => void;
   toggleClipSelection: (clipId: string) => void;
   clearSelection: () => void;
@@ -59,7 +76,23 @@ interface UIStore {
   exitSourceMode: () => void;
   markSourceIn: (time: number | null) => void;
   markSourceOut: (time: number | null) => void;
+
+  // Transform tool actions
+  startTransform: (state: TransformState) => void;
+  updateTransform: (state: TransformState) => void;
+  endTransform: () => void;
+  setTransformMode: (mode: "select" | "transform" | null) => void;
+
+  // Preview viewport actions (editor-only zoom/pan)
+  setPreviewZoom: (zoom: number) => void;
+  setPreviewPan: (panX: number, panY: number) => void;
+  resetPreviewViewport: () => void;
+  zoomPreviewToFit: (canvasWidth: number, canvasHeight: number, viewportWidth: number, viewportHeight: number) => void;
 }
+
+const PREVIEW_ZOOM_MIN = 0.1;
+const PREVIEW_ZOOM_MAX = 5.0;
+const PREVIEW_ZOOM_SNAP_EPSILON = 0.005; // tight band so wheel remains responsive
 
 export const useUIStore = create<UIStore>((set, get) => ({
   selectedClipIds: [],
@@ -76,13 +109,26 @@ export const useUIStore = create<UIStore>((set, get) => ({
   sourceInPoint: null,
   sourceOutPoint: null,
 
+  // Transform tool state
+  activeTransform: null,
+  transformMode: null,
+
+  // Preview viewport state (editor-only)
+  previewViewport: {
+    zoom: 1.0,
+    panX: 0,
+    panY: 0,
+  },
+
   selectClip: (clipId) => {
+    traceSelect("selectClip", { clipId, prev: get().selectedClipIds });
     set({ selectedClipIds: clipId ? [clipId] : [] });
   },
 
   toggleClipSelection: (clipId) => {
     set((state) => {
       const already = state.selectedClipIds.includes(clipId);
+      traceSelect("toggleClipSelection", { clipId, already, prev: state.selectedClipIds });
       return {
         selectedClipIds: already ? state.selectedClipIds.filter((id) => id !== clipId) : [...state.selectedClipIds, clipId],
       };
@@ -90,6 +136,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   },
 
   clearSelection: () => {
+    traceSelect("clearSelection", { prev: get().selectedClipIds });
     set({ selectedClipIds: [] });
   },
 
@@ -153,5 +200,62 @@ export const useUIStore = create<UIStore>((set, get) => ({
 
   markSourceOut: (time) => {
     set({ sourceOutPoint: time });
+  },
+
+  // Transform tool actions
+  startTransform: (state) => {
+    traceSelect("startTransform", { clipId: state.clipId, handle: state.handle, selected: get().selectedClipIds });
+    set({ activeTransform: state, transformMode: "transform" });
+  },
+
+  updateTransform: (state) => {
+    set({ activeTransform: state });
+  },
+
+  endTransform: () => {
+    traceSelect("endTransform", { activeTransform: get().activeTransform, selected: get().selectedClipIds });
+    set({ activeTransform: null, transformMode: "select" });
+  },
+
+  setTransformMode: (mode) => {
+    set({ transformMode: mode });
+  },
+
+  // Preview viewport actions (editor-only zoom/pan)
+  setPreviewZoom: (zoom) => {
+    const prevZoom = get().previewViewport.zoom;
+    let clamped = Math.max(PREVIEW_ZOOM_MIN, Math.min(PREVIEW_ZOOM_MAX, zoom));
+    // Magnetic snap around fit zoom (1.0 in current preview viewport model).
+    // Snap only when crossing near fit or landing very close from a non-near state.
+    const prevNearFit = Math.abs(prevZoom - 1.0) <= PREVIEW_ZOOM_SNAP_EPSILON;
+    const nextNearFit = Math.abs(clamped - 1.0) <= PREVIEW_ZOOM_SNAP_EPSILON;
+    const crossedFit = (prevZoom < 1.0 && clamped > 1.0) || (prevZoom > 1.0 && clamped < 1.0);
+    if (nextNearFit && (crossedFit || !prevNearFit)) {
+      clamped = 1.0;
+    }
+    set((state) => ({
+      previewViewport: { ...state.previewViewport, zoom: clamped },
+    }));
+  },
+
+  setPreviewPan: (panX, panY) => {
+    set((state) => ({
+      previewViewport: { ...state.previewViewport, panX, panY },
+    }));
+  },
+
+  resetPreviewViewport: () => {
+    set({
+      previewViewport: { zoom: 1.0, panX: 0, panY: 0 },
+    });
+  },
+
+  zoomPreviewToFit: (canvasWidth, canvasHeight, viewportWidth, viewportHeight) => {
+    const scaleX = viewportWidth / canvasWidth;
+    const scaleY = viewportHeight / canvasHeight;
+    const zoom = Math.min(scaleX, scaleY, 1.0); // Never zoom in beyond 100%
+    set({
+      previewViewport: { zoom, panX: 0, panY: 0 },
+    });
   },
 }));

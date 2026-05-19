@@ -306,6 +306,89 @@ describe("timelineClip timing helpers", () => {
       expect(clip.trimOut).toBe(clip.duration);
       expect(clip.duration).toBe(clip.trimOut - clip.trimIn);
     });
+
+    it("uses cover as the default visual fit mode", () => {
+      const asset: MediaAsset = {
+        id: "media-cover-default",
+        name: "portrait.mp4",
+        path: "/portrait.mp4",
+        type: "video",
+        duration: 10,
+        width: 1080,
+        height: 1920,
+        size: 1000,
+      };
+
+      const clip = createClipFromAsset({
+        asset,
+        trackId: "track-1",
+        startTime: 0,
+        width: 1920,
+        height: 1080,
+      });
+
+      // Cover should fill width and overflow/crop height for portrait-in-landscape.
+      expect(clip.width).toBe(1920);
+      expect(clip.height).toBeGreaterThan(1080);
+      expect(clip.x).toBe(0);
+      expect(clip.y).toBeLessThan(0);
+    });
+
+    it("supports contain fit mode for full-media visibility", () => {
+      const asset: MediaAsset = {
+        id: "media-contain",
+        name: "portrait.mp4",
+        path: "/portrait.mp4",
+        type: "video",
+        duration: 10,
+        width: 1080,
+        height: 1920,
+        size: 1000,
+      };
+
+      const clip = createClipFromAsset({
+        asset,
+        trackId: "track-1",
+        startTime: 0,
+        width: 1920,
+        height: 1080,
+        fitMode: "contain",
+      });
+
+      // Contain should fully fit inside the frame (pillarbox).
+      expect(clip.height).toBe(1080);
+      expect(clip.width).toBeLessThan(1920);
+      expect(clip.y).toBe(0);
+      expect(clip.x).toBeGreaterThan(0);
+    });
+
+    it("fits landscape image inside portrait canvas with contain (no crop)", () => {
+      const asset: MediaAsset = {
+        id: "landscape-image",
+        name: "landscape.png",
+        path: "/landscape.png",
+        type: "image",
+        duration: 0,
+        width: 1920,
+        height: 1080,
+        size: 1000,
+      };
+
+      const clip = createClipFromAsset({
+        asset,
+        trackId: "track-1",
+        startTime: 0,
+        width: 1080, // 9:16 canvas
+        height: 1920,
+        fitMode: "contain",
+      });
+
+      // Contain in portrait: full width, reduced height, vertically centered.
+      expect(clip.width).toBe(1080);
+      expect(clip.height).toBeLessThan(1920);
+      expect(clip.x).toBe(0);
+      expect(clip.y).toBeGreaterThan(0);
+    });
   });
 
   describe("timing invariant: duration === trimOut - trimIn", () => {

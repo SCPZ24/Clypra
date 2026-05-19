@@ -4,14 +4,17 @@ import { EnhancedMediaPanel } from "./EnhancedMediaPanel";
 import { PreviewPanel } from "./PreviewPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { Timeline } from "./timeline/Timeline";
-import { useTimelineStore } from "@/store/timelineStore";
+import { getInsertIndexForNewTrack, useTimelineStore } from "@/store/timelineStore";
 import { useProjectStore } from "@/store/projectStore";
 import { createClipFromAsset } from "@/lib/timelineClip";
 import { createTextClip, TEXT_PRESETS } from "@/lib/textClip";
+import { autoAdaptSequenceForFirstVisualClip } from "@/lib/sequenceAutoAspect";
+import { DEFAULT_PLACEMENT_POLICY, resolveAddToTimelinePlacement, resolveDefaultFitModeForAsset } from "@/lib/placementPolicy";
+import { getPlaybackClock } from "@/hooks/usePlaybackClock";
 
 export const EditorLayout: React.FC = () => {
-  const { tracks, addClip, addTrack, getTimelineEndTime } = useTimelineStore();
-  const { mediaAssets, project } = useProjectStore();
+  const { tracks, clips, addClip, addTrack, insertTrackAt, getTimelineEndTime } = useTimelineStore();
+  const { mediaAssets, project, updateProject } = useProjectStore();
 
   const handleAddToTimeline = (item: any, type: string) => {
     // Handle different item types
@@ -19,30 +22,40 @@ export const EditorLayout: React.FC = () => {
       const mediaAsset = mediaAssets.find((asset) => asset.id === item.id);
       if (!mediaAsset) return;
 
-      // Determine the appropriate track type based on media type
-      const targetTrackType = mediaAsset.type === "audio" ? "audio" : "video";
-
-      // Find the first track of the appropriate type
-      let targetTrack = tracks.find((track) => track.type === targetTrackType && !track.locked);
-
-      // If no track exists for this type, create one
-      if (!targetTrack) {
-        addTrack(targetTrackType);
-        // Get the newly created track
-        targetTrack = useTimelineStore.getState().tracks.find((t) => t.type === targetTrackType && !t.locked);
+      const placement = resolveAddToTimelinePlacement({
+        asset: mediaAsset,
+        tracks,
+        clips,
+        playheadTime: getPlaybackClock().time,
+        sequenceEndTime: getTimelineEndTime(),
+      });
+      let targetTrackId = placement.targetTrackId;
+      if (placement.shouldCreateTrack || !targetTrackId) {
+        const latestTracks = useTimelineStore.getState().tracks;
+        const insertIndex = getInsertIndexForNewTrack(latestTracks, placement.trackType);
+        targetTrackId = insertTrackAt(placement.trackType, insertIndex);
       }
 
-      if (!targetTrack) return;
+      if (!targetTrackId) return;
 
-      // Get the end time of all existing clips
-      const endTime = getTimelineEndTime();
+      if (DEFAULT_PLACEMENT_POLICY.autoAdaptSequenceForFirstVisualClip) {
+        autoAdaptSequenceForFirstVisualClip({
+          project,
+          existingClips: clips,
+          asset: mediaAsset,
+          updateProject,
+        });
+      }
+
+      const nextProject = useProjectStore.getState().project;
 
       const newClip = createClipFromAsset({
         asset: mediaAsset,
-        trackId: targetTrack.id,
-        startTime: endTime,
-        width: project?.canvasWidth || 1920,
-        height: project?.canvasHeight || 1080,
+        trackId: targetTrackId,
+        startTime: placement.startTime,
+        width: nextProject?.canvasWidth || project?.canvasWidth || 1920,
+        height: nextProject?.canvasHeight || project?.canvasHeight || 1080,
+        fitMode: resolveDefaultFitModeForAsset(mediaAsset),
       });
 
       addClip(newClip);

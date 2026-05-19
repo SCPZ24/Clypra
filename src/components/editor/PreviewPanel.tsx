@@ -15,7 +15,7 @@
  * If users want to see source media aspect ratio, they should use Source Preview mode.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Check, ChevronDown, Expand, Shrink, Volume2, VolumeX } from "lucide-react";
 import { usePlaybackClock, usePlaybackControls, useTransportControls, getPlaybackClock } from "@/hooks/usePlaybackClock";
 import { useProjectStore } from "@/store/projectStore";
@@ -23,11 +23,14 @@ import { useTimelineStore } from "@/store/timelineStore";
 import { useUIStore } from "@/store/uiStore";
 import { evaluateSceneCached } from "@/core/evaluation/evaluator";
 import { getFrameScheduler } from "@/core/scheduler/FrameScheduler";
-import { getActiveSessionOrNull } from "@/core/runtime/ProjectSession";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { getActiveSessionOrNull, subscribeToSessionChanges } from "@/core/runtime/ProjectSession";
 import { SourcePreview } from "./SourcePreview";
 import { PreviewTransport } from "./PreviewTransport";
+import { TransformOverlayMemoized as TransformOverlay } from "./transform/TransformOverlay";
+import { useViewportKeyboardShortcuts, useViewportWheelZoom, useViewportPan } from "./ViewportControls";
+import { calculateDisplayTransform } from "@/lib/coordinateSystem";
 import { GPUTextureCache } from "@/lib/gpuTextureCache";
+import { PreviewQualityManager, PreviewQualityTier } from "@/lib/preview/PreviewQualityManager";
 import { cn } from "@/lib/utils";
 import type { EvaluatedMediaLayer } from "@/core/evaluation/types";
 import { AspectRatio, PREVIEW_ASPECT_LABEL } from "@/types";
@@ -115,15 +118,14 @@ const ProgramPreview: React.FC = () => {
   const mediaAssets = useProjectStore((s) => s.mediaAssets);
   const tracks = useTimelineStore((s) => s.tracks);
   const clips = useTimelineStore((s) => s.clips);
+  const clearSelection = useUIStore((s) => s.clearSelection);
   const epoch = useTimelineStore((s) => s.epoch);
+  const { previewViewport } = useUIStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(100);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  /** Bumps after program <video> metadata loads so we re-seek once duration is valid. */
-  const [previewVideoReadyTick, setPreviewVideoReadyTick] = useState(0);
   /** fit = letterbox full canvas; fill = zoom canvas to cover panel (crop edges). */
   const [previewScaleMode, setPreviewScaleMode] = useState<"fit" | "fill">("fit");
   const [previewAspectPreset, setPreviewAspectPreset] = useState<AspectRatio>("original");
@@ -134,6 +136,8 @@ const ProgramPreview: React.FC = () => {
   const [useCanvasPreview] = useState(true); // Canvas is authoritative visual output
   const gpuCacheRef = useRef<GPUTextureCache | null>(null);
   const gpuFallbackRef = useRef(false); // true if WebGL2 unavailable → use Canvas2D
+  const qualityManagerRef = useRef<PreviewQualityManager | null>(null);
+  const qualityManagerSigRef = useRef<string>("");
   const [showTelemetry, setShowTelemetry] = useState(false);
   const [telemetryStats, setTelemetryStats] = useState<{
     avgEvaluationTimeMs: number;
@@ -151,6 +155,7 @@ const ProgramPreview: React.FC = () => {
 
   const droppedFramesRef = useRef(0);
   const maxDriftRef = useRef(0);
+  const activeSession = useSyncExternalStore(subscribeToSessionChanges, getActiveSessionOrNull, () => null);
 
   // Track original canvas dimensions when project loads
   const originalCanvasDimsRef = useRef<{ width: number; height: number } | null>(null);
@@ -266,8 +271,7 @@ const ProgramPreview: React.FC = () => {
   // Scene evaluation (for UI and initial render)
   const scene = useMemo(() => evaluateSceneCached(clockState.time, clips, tracks, mediaAssets, project ?? null, epoch), [tracks, clips, mediaAssets, clockState.time, project, epoch]);
 
-  // Video element management - separate from scene time updates
-  // Create/destroy video elements based on clip composition only, not playback time
+  // Track video/audio clips for engine-side media pool sync
   const videoClips = useMemo(() => {
     return clips.filter((clip) => {
       const asset = mediaAssets.find((a) => a.id === clip.mediaId);
@@ -275,22 +279,61 @@ const ProgramPreview: React.FC = () => {
     });
   }, [clips, mediaAssets]);
 
-  // Calculate display dimensions for canvas
+  const audioClips = useMemo(() => {
+    return clips.filter((clip) => {
+      const asset = mediaAssets.find((a) => a.id === clip.mediaId);
+      return asset?.type === "audio";
+    });
+  }, [clips, mediaAssets]);
+
+  // Calculate display dimensions for canvas with viewport transform
   const canvasWidth = project?.canvasWidth ?? 1920;
   const canvasHeight = project?.canvasHeight ?? 1080;
-  const originalAspectR = resolveOriginalPreviewAspect(
-    scene.visualLayers.filter((l) => l.layerType === "media"),
-    mediaAssets,
-    canvasWidth,
-    canvasHeight,
+
+  // Calculate display transform with viewport zoom/pan
+  const displayTransform = useMemo(() => {
+    return calculateDisplayTransform({ width: canvasWidth, height: canvasHeight }, previewViewport, dimensions.width, dimensions.height, previewScaleMode);
+  }, [canvasWidth, canvasHeight, previewViewport, dimensions.width, dimensions.height, previewScaleMode]);
+
+  const { scale, offsetX, offsetY, displayWidth, displayHeight } = displayTransform;
+
+  // Add viewport control hooks
+  useViewportKeyboardShortcuts(canvasWidth, canvasHeight, dimensions.width, dimensions.height);
+  useViewportWheelZoom(containerRef as React.RefObject<HTMLElement>);
+  const { isPanning, spacePressed } = useViewportPan(containerRef as React.RefObject<HTMLElement>);
+
+  const handlePreviewPointerDownCapture = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      if (isPanning || spacePressed) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      // Keep selection when interacting with transform handles/surfaces.
+      if (target.closest("[data-transform-handle]")) return;
+      // Do not interfere with playhead interactions.
+      if (target.closest("[data-playhead]")) return;
+      // Clicking blank preview area should deselect active clip(s).
+      clearSelection();
+    },
+    [clearSelection, isPanning, spacePressed],
   );
-  const aspectR = previewAspectPreset === "original" ? originalAspectR : previewAspectWidthOverHeight(previewAspectPreset, canvasWidth, canvasHeight);
-  const { vw, vh } = previewViewportSize(dimensions.width, dimensions.height, aspectR);
-  const scaleFit = Math.min(vw / canvasWidth, vh / canvasHeight);
-  const scaleFill = Math.max(vw / canvasWidth, vh / canvasHeight);
-  const scale = previewScaleMode === "fit" ? scaleFit : scaleFill;
-  const displayWidth = canvasWidth * scale;
-  const displayHeight = canvasHeight * scale;
+
+  // Preview Quality Manager — prevents 4K × DPR VRAM explosion
+  const dpr = window.devicePixelRatio || 1;
+  const qmSig = `${project?.id ?? "no-project"}:${canvasWidth}x${canvasHeight}`;
+  if (project && (!qualityManagerRef.current || qualityManagerSigRef.current !== qmSig)) {
+    qualityManagerRef.current = new PreviewQualityManager({
+      sequenceWidth: canvasWidth,
+      sequenceHeight: canvasHeight,
+      viewportWidth: Math.floor(displayWidth),
+      viewportHeight: Math.floor(displayHeight),
+      dpr,
+    });
+    qualityManagerSigRef.current = qmSig;
+  }
+  if (qualityManagerRef.current) {
+    qualityManagerRef.current.updateViewport(Math.floor(displayWidth), Math.floor(displayHeight), dpr);
+  }
 
   // GPU cache initialization — create once, reuse across resizes and state changes.
   // GPU resources survive layout changes; only disposed on unmount.
@@ -328,6 +371,14 @@ const ProgramPreview: React.FC = () => {
 
     if (displayWidth === 0 || displayHeight === 0) return;
 
+    // Apply DPR to canvas backing store for crisp rendering on Retina/HiDPI.
+    // CSS size stays at displayWidth × displayHeight; pixel buffer is DPR-scaled.
+    const canvasDpr = window.devicePixelRatio || 1;
+    const backingW = Math.round(displayWidth * canvasDpr);
+    const backingH = Math.round(displayHeight * canvasDpr);
+    canvas.width = backingW;
+    canvas.height = backingH;
+
     // ── Resolve rendering context (GPU cache persists across re-runs) ──
     const gpuCache = gpuCacheRef.current;
     let ctx2d: CanvasRenderingContext2D | null = null;
@@ -335,6 +386,8 @@ const ProgramPreview: React.FC = () => {
     if (!gpuCache) {
       ctx2d = canvas.getContext("2d");
       if (ctx2d) {
+        // Scale context so subsequent draws use CSS-pixel coordinates
+        ctx2d.setTransform(canvasDpr, 0, 0, canvasDpr, 0, 0);
         ctx2d.clearRect(0, 0, displayWidth, displayHeight);
       }
     }
@@ -367,11 +420,21 @@ const ProgramPreview: React.FC = () => {
       isRendering = true;
       const timeToRender = clock.time;
 
+      // Select quality tier based on playback/interaction state
+      const qm = qualityManagerRef.current;
+      const isPlaying = clockState.state === "playing";
+      const qualityTier = qm ? qm.selectTierForInteraction(isPlaying, false, false) : PreviewQualityTier.Idle;
+      const profile = qm ? qm.getRenderProfile(qualityTier) : { maxWidth: canvasWidth, maxHeight: canvasHeight, dprScale: dpr, useDpr: true };
+
       // Check GPU texture cache for this frame (skip scheduler entirely on cache hit)
+      // Cache key uses render dimensions (what we render) not display dimensions (what we show)
       if (gpuCache) {
-        const cacheKey = `preview:${epoch}:${timeToRender.toFixed(3)}:${displayWidth}x${displayHeight}`;
+        const renderW = profile.maxWidth;
+        const renderH = profile.maxHeight;
+        const cacheKey = `preview:${project.id}:${epoch}:${timeToRender.toFixed(3)}:${renderW}x${renderH}:${dpr}`;
         if (gpuCache.hasTexture(cacheKey)) {
           gpuCache.clear();
+          // Render full-resolution texture scaled down to display size
           gpuCache.renderTexture(cacheKey, 0, 0, displayWidth, displayHeight);
           isRendering = false;
           return;
@@ -384,21 +447,18 @@ const ProgramPreview: React.FC = () => {
       }
 
       // Build map of active video elements to bypass resource decoding
-      const activeVideoElements = new Map<string, HTMLVideoElement>();
-      for (const [key, video] of Object.entries(videoRefs.current)) {
-        if (video) {
-          activeVideoElements.set(key, video);
-        }
-      }
+      const session = getActiveSessionOrNull();
+      const activeVideoElements = session?.getPreviewVideoElements() ?? new Map<string, HTMLVideoElement>();
 
-      // Schedule frame render
+      // Schedule frame render at quality-manager-capped resolution
+      // Prevents 4K × DPR VRAM explosion while maintaining visual fidelity
       const jobId = scheduler.schedule({
         time: timeToRender,
         resolution: {
-          width: displayWidth,
-          height: displayHeight,
+          width: profile.maxWidth,
+          height: profile.maxHeight,
         },
-        pixelRatio: 1,
+        pixelRatio: profile.useDpr ? profile.dprScale : 1.0,
         outputFormat: "imagebitmap",
         priority: "realtime",
         videoElements: activeVideoElements,
@@ -413,19 +473,28 @@ const ProgramPreview: React.FC = () => {
 
           if (result.data instanceof ImageBitmap) {
             if (gpuCache) {
-              // GPU path: upload bitmap as texture, render from GPU, close bitmap
-              const cacheKey = `preview:${epoch}:${timeToRender.toFixed(3)}:${displayWidth}x${displayHeight}`;
+              // GPU path: upload capped-resolution bitmap as texture, render scaled down to display size
+              const cacheKey = `preview:${project.id}:${epoch}:${timeToRender.toFixed(3)}:${profile.maxWidth}x${profile.maxHeight}:${dpr}`;
               gpuCache.uploadTexture(cacheKey, result.data, result.data.width, result.data.height);
               gpuCache.clear();
+              // Scale down from full canvas resolution to display size
               gpuCache.renderTexture(cacheKey, 0, 0, displayWidth, displayHeight);
               result.data.close();
 
               // Evict LRU textures if GPU memory exceeds limit
               gpuCache.evictLRU(GPU_MEMORY_LIMIT_MB);
             } else if (ctx2d) {
-              // Canvas2D fallback path
+              // Canvas2D fallback path: center bitmap with aspect-ratio preservation
+              // Context transform already set to canvasDpr, so use CSS-pixel coords.
+              const bitmapW = result.data.width;
+              const bitmapH = result.data.height;
+              const fitScale = Math.min(displayWidth / bitmapW, displayHeight / bitmapH);
+              const drawW = bitmapW * fitScale;
+              const drawH = bitmapH * fitScale;
+              const ox = (displayWidth - drawW) / 2;
+              const oy = (displayHeight - drawH) / 2;
               ctx2d.clearRect(0, 0, displayWidth, displayHeight);
-              ctx2d.drawImage(result.data, 0, 0);
+              ctx2d.drawImage(result.data, ox, oy, drawW, drawH);
               result.data.close();
             }
           }
@@ -469,171 +538,29 @@ const ProgramPreview: React.FC = () => {
         scheduler.cancel(lastJobId);
       }
     };
-  }, [useCanvasPreview, clips, tracks, mediaAssets, project, epoch, clock, displayWidth, displayHeight]);
+  }, [useCanvasPreview, clips, tracks, mediaAssets, project, epoch, clock, displayWidth, displayHeight, canvasWidth, canvasHeight]);
 
-  // Cleanup video elements on component unmount only
-  useEffect(() => {
-    return () => {
-      const session = getActiveSessionOrNull();
-      Object.entries(videoRefs.current).forEach(([key, video]) => {
-        if (!video) return;
-        session?.unregisterVideoElement(key);
-        video.pause();
-        video.src = "";
-        video.load();
+  // ── Sync preview media elements with engine pool ─────────────────────────
+  // The engine (PreviewMediaPool) owns all <video> and <audio> elements.
+  // React only tells it what should exist and what the current clock state is.
+  // We use useLayoutEffect so it syncs BEFORE the RAF render loop fires its first frame.
+  useLayoutEffect(() => {
+    const session = activeSession;
+
+    if (!session) return;
+
+    try {
+      session.syncPreviewMedia(clips, mediaAssets, tracks, {
+        time: clock.time,
+        state: clockState.state,
+        speed: clockState.speed,
+        muted: isMuted,
+        volume,
       });
-      videoRefs.current = {};
-    };
-  }, []);
-
-  // Sync video playback state (doesn't touch src)
-  useEffect(() => {
-    const currentClockTime = clock.time;
-
-    console.log(`[PreviewPanel] Sync video playback - clockState: ${clockState.state}, time: ${currentClockTime.toFixed(3)}s, videos: ${Object.keys(videoRefs.current).length}`);
-
-    Object.values(videoRefs.current).forEach((video) => {
-      if (!video) return;
-
-      const clipId = video.dataset.clipId;
-      const mediaId = video.dataset.mediaId;
-      const videoKey = `${clipId}-${mediaId}`;
-
-      // Skip if video has no source or isn't ready
-      if (!video.src || video.readyState < 2) {
-        console.log(`[PreviewPanel] Video ${videoKey} not ready - src: ${!!video.src}, readyState: ${video.readyState}`);
-        return;
-      }
-
-      console.log(`[PreviewPanel] Video ${videoKey} - readyState: ${video.readyState}, duration: ${video.duration.toFixed(2)}s, paused: ${video.paused}, currentTime: ${video.currentTime.toFixed(3)}s`);
-
-      // Audio settings
-      video.muted = isMuted || volume === 0;
-      video.volume = Math.max(0, Math.min(1, volume / 100));
-      video.playbackRate = clockState.speed;
-
-      // Set initial time when starting playback or when paused
-      if (Number.isFinite(video.duration) && video.duration > 0) {
-        const clip = clips.find((c) => c.id === clipId);
-
-        if (clip) {
-          const clipLocalTime = currentClockTime - clip.startTime;
-          const trimIn = clip.trimIn || 0;
-          const sourceTime = trimIn + clipLocalTime;
-          const targetTime = Math.max(0, Math.min(sourceTime, Math.max(0, video.duration - 0.01)));
-
-          if (clockState.state !== "playing") {
-            console.log(`[PreviewPanel] Video ${videoKey} - seeking to ${targetTime.toFixed(3)}s (paused)`);
-            video.currentTime = targetTime;
-          } else if (video.paused) {
-            console.log(`[PreviewPanel] Video ${videoKey} - seeking to ${targetTime.toFixed(3)}s (before play)`);
-            video.currentTime = targetTime;
-          }
-        }
-      }
-
-      // Play/pause based on clock state
-      if (clockState.state === "playing") {
-        if (video.paused) {
-          // Only try to play if video is ready
-          if (video.readyState >= 3) {
-            console.log(`[PreviewPanel] Video ${videoKey} - calling play() (readyState: ${video.readyState})`);
-            const playPromise = video.play();
-            if (playPromise !== undefined) {
-              playPromise
-                .then(() => {
-                  console.log(`[PreviewPanel] Video ${videoKey} - play() succeeded`);
-                })
-                .catch((err) => {
-                  if (err.name !== "AbortError") {
-                    console.warn(`[PreviewPanel] Video ${videoKey} - play() failed:`, err);
-                  }
-                });
-            }
-          } else {
-            console.log(`[PreviewPanel] Video ${videoKey} - skipping play(), readyState: ${video.readyState} (need >= 3)`);
-          }
-        }
-      } else {
-        if (!video.paused) {
-          console.log(`[PreviewPanel] Video ${videoKey} - calling pause()`);
-          video.pause();
-        }
-      }
-    });
-
-    // NO cleanup here - videos persist across playback state changes
-  }, [clockState.state, isMuted, volume, clockState.speed, clips, clock, previewVideoReadyTick]);
-
-  // Continuous drift correction via RAF (replaces 250ms interval for frame-accurate sync)
-  useEffect(() => {
-    if (clockState.state !== "playing") return;
-
-    let rafId: number | null = null;
-
-    const syncLoop = () => {
-      const currentClockTime = clock.time; // Fresh time every frame
-
-      Object.values(videoRefs.current).forEach((video) => {
-        if (!video) return;
-
-        const clipId = video.dataset.clipId;
-        const clip = clips.find((c) => c.id === clipId);
-        if (!clip) return;
-
-        const clipLocalTime = currentClockTime - clip.startTime;
-        if (clipLocalTime < 0 || clipLocalTime > clip.duration) {
-          if (!video.paused) video.pause();
-          return;
-        }
-
-        const trimIn = clip.trimIn || 0;
-        const sourceTime = trimIn + clipLocalTime;
-
-        if (Number.isFinite(video.duration) && video.duration > 0 && video.readyState >= 3) {
-          const targetTime = Math.max(0, Math.min(sourceTime, Math.max(0, video.duration - 0.01)));
-          const drift = Math.abs(video.currentTime - targetTime);
-
-          maxDriftRef.current = Math.max(maxDriftRef.current, drift);
-
-          if ("preservesPitch" in video) {
-            (video as any).preservesPitch = false;
-          }
-
-          if (drift < 0.1) {
-            // <100ms: Perfect sync — just ensure correct playbackRate
-            if (Math.abs(video.playbackRate - clockState.speed) > 0.01) {
-              video.playbackRate = clockState.speed;
-            }
-          } else if (drift <= 0.3) {
-            // 100ms - 300ms: Soft playbackRate correction
-            const correctionSpeed = video.currentTime < targetTime ? clockState.speed * 1.02 : clockState.speed * 0.98;
-            if (Math.abs(video.playbackRate - correctionSpeed) > 0.01) {
-              video.playbackRate = correctionSpeed;
-            }
-          } else if (drift <= 0.6) {
-            // 300ms - 600ms: Hard seek
-            video.currentTime = targetTime;
-            video.playbackRate = clockState.speed;
-          } else {
-            // >600ms: Playback recovery reset
-            video.pause();
-            video.currentTime = targetTime;
-            video.playbackRate = clockState.speed;
-            const p = video.play();
-            if (p && typeof p.catch === "function") p.catch(console.error);
-          }
-        }
-      });
-
-      rafId = requestAnimationFrame(syncLoop);
-    };
-
-    rafId = requestAnimationFrame(syncLoop);
-    return () => {
-      if (rafId !== null) cancelAnimationFrame(rafId);
-    };
-  }, [clockState.state, clockState.speed, clips, clock]);
+    } catch (error) {
+      console.error(`[PreviewPanel ERROR] Exception calling syncPreviewMedia:`, error);
+    }
+  }, [activeSession, clips, mediaAssets, tracks, clockState.state, clockState.speed, isMuted, volume, clock.time, clockState.time]);
 
   if (!project) return null;
 
@@ -697,184 +624,34 @@ const ProgramPreview: React.FC = () => {
       {/* ── Video Area ─────────────────────────────────────────────── */}
       <div className="flex-1 flex items-center justify-center overflow-hidden bg-[#06080a] relative">
         <div className="absolute inset-0 checkerboard opacity-[0.15] pointer-events-none" />
-        <div ref={containerRef} className="w-full h-full flex items-center justify-center relative z-10 overflow-hidden">
-          <div data-testid="program-preview-viewport" className="relative flex shrink-0 items-center justify-center overflow-hidden shadow-[0_0_40px_rgba(0, 0, 0, 0.36)]" style={{ width: vw, height: vh }}>
-            {useCanvasPreview ? (
-              <>
-                {/* Canvas-based preview (matches export rendering) */}
-                <canvas
-                  ref={canvasRef}
-                  data-testid="program-preview-canvas"
-                  width={displayWidth}
-                  height={displayHeight}
-                  style={{
-                    width: displayWidth,
-                    height: displayHeight,
-                    imageRendering: "auto",
-                  }}
-                  className="bg-black"
-                />
-                {/* Hidden video elements for audio/video sync (ENGINE CLOCK IS MASTER). 
-                    CRITICAL: Do NOT use width: 0, height: 0, or opacity: 0. 
-                    Browsers throttle decoding for invisible videos, destroying A/V sync.
-                    Keep them 1x1 pixel with near-zero opacity to force hardware decoding. 
-                    
-                    ARCHITECTURE: Video elements are keyed by clip+media ID and persist across time updates.
-                    They are only created/destroyed when clips are added/removed, not on every frame. */}
-                <div className="absolute top-0 left-0 pointer-events-none -z-10" style={{ width: "16px", height: "16px", opacity: 0.01, visibility: "hidden", overflow: "hidden" }}>
-                  {videoClips.map((clip) => {
-                    const asset = mediaAssets.find((a) => a.id === clip.mediaId);
-                    if (!asset) return null;
-                    const sourcePath = asset.path.startsWith("asset://") ? asset.path : convertFileSrc(asset.path);
+        <div ref={containerRef} onPointerDownCapture={handlePreviewPointerDownCapture} className={cn("w-full h-full flex items-center justify-center relative z-10 overflow-hidden", isPanning && "cursor-grabbing", spacePressed && !isPanning && "cursor-grab")}>
+          <div data-testid="program-preview-viewport" className="relative flex shrink-0 items-center justify-center overflow-hidden shadow-[0_0_40px_rgba(0, 0, 0, 0.36)]" style={{ width: displayWidth, height: displayHeight }}>
+            <>
+              {/* Canvas-based preview (matches export rendering) */}
+              <canvas
+                ref={canvasRef}
+                data-testid="program-preview-canvas"
+                /* Backing-store size is set dynamically in the render-loop effect
+                   to displayWidth*dpr × displayHeight*dpr for crisp HiDPI rendering.
+                   CSS size controls layout. */
+                style={{
+                  width: displayWidth,
+                  height: displayHeight,
+                  imageRendering: "auto",
+                }}
+                className="bg-black"
+              />
 
-                    return (
-                      <video
-                        key={`${clip.id}-${clip.mediaId}`}
-                        data-media-id={clip.mediaId}
-                        data-clip-id={clip.id}
-                        ref={(el) => {
-                          const key = `${clip.id}-${clip.mediaId}`;
-                          const session = getActiveSessionOrNull();
-                          if (el) {
-                            videoRefs.current[key] = el;
-                            session?.registerVideoElement(key, el);
-                          } else if (videoRefs.current[key]) {
-                            session?.unregisterVideoElement(key);
-                            delete videoRefs.current[key];
-                          }
-                        }}
-                        src={sourcePath}
-                        muted={isMuted || volume === 0}
-                        playsInline
-                        preload="auto"
-                        onLoadedMetadata={(e) => {
-                          const video = e.currentTarget;
-                          const key = `${clip.id}-${clip.mediaId}`;
-                          console.log(`[PreviewPanel] Video metadata loaded - ${key}, duration: ${video.duration.toFixed(2)}s, readyState: ${video.readyState}`);
-                          setPreviewVideoReadyTick((n) => n + 1);
-                        }}
-                        onCanPlay={(e) => {
-                          const video = e.currentTarget;
-                          const key = `${clip.id}-${clip.mediaId}`;
-                          console.log(`[PreviewPanel] Video canPlay - ${key}, readyState: ${video.readyState}`);
-                        }}
-                        onError={(e) => {
-                          const key = `${clip.id}-${clip.mediaId}`;
-                          console.error(`[PreviewPanel] Video error - ${key}:`, e.currentTarget.error);
-                        }}
-                        className="w-full h-full"
-                      />
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
-              // DOM-based preview (legacy, for comparison)
-              <div data-testid="program-preview-canvas" className="relative shrink-0 bg-black" style={{ width: displayWidth, height: displayHeight }}>
-                {scene.visualLayers.length === 0 ? (
-                  <div className="absolute inset-0 flex items-center justify-center text-text-muted">Preview</div>
-                ) : (
-                  scene.visualLayers.map((layer) => {
-                    // Render text layers
-                    if (layer.layerType === "text") {
-                      return (
-                        <div
-                          key={layer.layerId}
-                          data-testid="preview-text-layer"
-                          className="absolute overflow-hidden flex items-center justify-center"
-                          style={{
-                            left: layer.x * scale,
-                            top: layer.y * scale,
-                            width: layer.width * scale,
-                            height: layer.height * scale,
-                            opacity: Math.max(0, Math.min(1, layer.opacity > 1 ? layer.opacity / 100 : layer.opacity)),
-                            transform: `rotate(${layer.rotation}deg)`,
-                            transformOrigin: "center center",
-                            zIndex: layer.zIndex + 1,
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontFamily: layer.fontFamily,
-                              fontSize: `${layer.fontSize * scale}px`,
-                              color: layer.color,
-                              fontWeight: layer.fontWeight,
-                              fontStyle: layer.fontStyle,
-                              textAlign: layer.textAlign,
-                              lineHeight: layer.lineHeight,
-                              letterSpacing: `${layer.letterSpacing * scale}px`,
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                              width: "100%",
-                              padding: "8px",
-                            }}
-                          >
-                            {layer.text}
-                          </div>
-                        </div>
-                      );
-                    }
+              {/* Transform overlay for selected clips */}
+              <TransformOverlay canvasWidth={canvasWidth} canvasHeight={canvasHeight} scale={scale} viewport={previewViewport} displayOffset={{ x: offsetX, y: offsetY }} displayWidth={displayWidth} displayHeight={displayHeight} currentTime={currentTime} />
 
-                    // Render media layers (video/image)
-                    return (
-                      <div
-                        key={layer.layerId}
-                        data-testid="preview-layer"
-                        className="absolute overflow-hidden"
-                        style={{
-                          left: layer.x * scale,
-                          top: layer.y * scale,
-                          width: layer.width * scale,
-                          height: layer.height * scale,
-                          opacity: Math.max(0, Math.min(1, layer.opacity > 1 ? layer.opacity / 100 : layer.opacity)),
-                          transform: `rotate(${layer.rotation}deg)`,
-                          transformOrigin: "center center",
-                          zIndex: layer.zIndex + 1,
-                        }}
-                      >
-                        {layer.mediaType === "video" ? (
-                          <video
-                            data-media-id={layer.mediaId}
-                            data-clip-id={layer.clipId}
-                            ref={(el) => {
-                              videoRefs.current[`${layer.clipId}-${layer.mediaId}`] = el;
-                              if (el) {
-                                console.log(`[PreviewPanel] Video element created (visual) - ${layer.clipId}-${layer.mediaId}, src: ${layer.sourcePath}`);
-                              }
-                            }}
-                            src={layer.sourcePath}
-                            muted={isMuted || volume === 0}
-                            playsInline
-                            preload="auto"
-                            onLoadedMetadata={(e) => {
-                              const video = e.currentTarget;
-                              console.log(`[PreviewPanel] Video metadata loaded (visual) - ${layer.clipId}-${layer.mediaId}, duration: ${video.duration.toFixed(2)}s, readyState: ${video.readyState}`);
-                              setPreviewVideoReadyTick((n) => n + 1);
-                            }}
-                            onCanPlay={(e) => {
-                              const video = e.currentTarget;
-                              console.log(`[PreviewPanel] Video canPlay (visual) - ${layer.clipId}-${layer.mediaId}, readyState: ${video.readyState}`);
-                            }}
-                            onError={(e) => {
-                              console.error(`[PreviewPanel] Video error (visual) - ${layer.clipId}-${layer.mediaId}:`, e.currentTarget.error);
-                            }}
-                            className="w-full h-full object-contain"
-                          />
-                        ) : (
-                          <img src={layer.posterFrame || layer.sourcePath} alt={layer.mediaId} className="w-full h-full object-contain" />
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            )}
+            </>
           </div>
         </div>
 
         {/* Professional empty state - shows sequence context when no clips. Applied same width and height has canvas, so that it's always fit-in professionally*/}
         {clips.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none mx-auto" style={{ width: vw, height: vh }}>
+          <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none mx-auto" style={{ width: displayWidth, height: displayHeight }}>
             <div className="text-center space-y-3">
               <div className="text-sm font-medium text-text-muted">No clips in sequence</div>
               <div className="text-xs text-text-muted/80 space-y-1 font-mono">

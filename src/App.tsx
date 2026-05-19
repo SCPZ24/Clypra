@@ -1,3 +1,4 @@
+// NLE placement policy for media and clips
 import { useState, useEffect } from "react";
 import { LaunchScreen } from "@/components/screens/LaunchScreen";
 import { EditorScreen } from "@/components/screens/EditorScreen";
@@ -6,12 +7,14 @@ import { useProjectStore } from "@/store/projectStore";
 import { useUIStore } from "@/store/uiStore";
 import type { Project, AspectRatio } from "@/types";
 import { fromRustProject, type RustProject } from "@/types/serialization";
+import { SettingsModal } from "./components/ui/SettingsModal";
 
 const isExternalOrDataUrl = (value: string) => value.startsWith("data:") || value.startsWith("http") || value.startsWith("asset://");
 
 const App = () => {
   const { project, createProject, loadProject, setRecentProjects } = useProjectStore();
   const [isLoading, setIsLoading] = useState(true);
+  const { showSettingsModal, toggleSettingsModal } = useUIStore();
 
   useEffect(() => {
     const initializeApp = async () => {
@@ -47,6 +50,34 @@ const App = () => {
 
     initializeApp();
   }, [setRecentProjects]);
+
+  useEffect(() => {
+    if (import.meta.env.DEV) return;
+
+    const onContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const isMetaOrCtrl = event.metaKey || event.ctrlKey;
+      const isDevtoolsCombo = isMetaOrCtrl && event.shiftKey && (key === "i" || key === "j" || key === "c");
+      const isInspectorKey = key === "f12";
+
+      if (isDevtoolsCombo || isInspectorKey) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+
+    window.addEventListener("contextmenu", onContextMenu, true);
+    window.addEventListener("keydown", onKeyDown, true);
+
+    return () => {
+      window.removeEventListener("contextmenu", onContextMenu, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, []);
 
   const handleCreateProject = (name: string, aspectRatio: AspectRatio, frameRate: 24 | 30 | 60) => {
     // Reset UI state from any previous session
@@ -106,7 +137,12 @@ const App = () => {
     );
   }
 
-  return <TooltipProvider delayDuration={0}>{project ? <EditorScreen /> : <LaunchScreen onProjectCreate={handleCreateProject} onProjectOpen={handleOpenProject} />}</TooltipProvider>;
+  return (
+    <>
+      <TooltipProvider delayDuration={0}>{project ? <EditorScreen /> : <LaunchScreen onProjectCreate={handleCreateProject} onProjectOpen={handleOpenProject} />}</TooltipProvider>
+      <SettingsModal isOpen={showSettingsModal} onClose={toggleSettingsModal} />
+    </>
+  );
 };
 
 export default App;

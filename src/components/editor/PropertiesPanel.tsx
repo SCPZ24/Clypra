@@ -3,13 +3,21 @@ import { Settings } from "lucide-react";
 import { EmptyState } from "../ui/EmptyState";
 import { useUIStore } from "@/store/uiStore";
 import { useTimelineStore } from "@/store/timelineStore";
+import { useProjectStore } from "@/store/projectStore";
+import { useHistoryStore } from "@/store/historyStore";
+import { TransformClipCommand } from "@/core/history/commands/TransformCommand";
+import { calculateClipDimensions, type ClipFitModeExtended } from "@/lib/timelineClip";
 
 export const PropertiesPanel: React.FC = () => {
   const { selectedClipIds } = useUIStore();
-  const { clips, updateClip } = useTimelineStore();
+  const { clips } = useTimelineStore();
+  const { mediaAssets, project } = useProjectStore();
+  const { execute } = useHistoryStore();
 
   const selectedClipId = selectedClipIds[0] ?? null;
   const selectedClip = clips.find((c) => c.id === selectedClipId);
+  const selectedAsset = mediaAssets.find((a) => a.id === selectedClip?.mediaId);
+  const isVisualClip = selectedAsset?.type === "video" || selectedAsset?.type === "image";
 
   if (!selectedClipId || !selectedClip) {
     return (
@@ -24,7 +32,33 @@ export const PropertiesPanel: React.FC = () => {
   }
 
   const handleUpdate = (key: keyof typeof selectedClip, value: any) => {
-    updateClip(selectedClipId, { [key]: value });
+    const oldTransform = { [key]: selectedClip[key] };
+    const newTransform = { [key]: value };
+    execute(new TransformClipCommand(selectedClipId, oldTransform, newTransform));
+  };
+
+  const handleApplyFit = (fitMode: ClipFitModeExtended) => {
+    if (!selectedClip || !selectedAsset || !project || !isVisualClip) return;
+    const rect = calculateClipDimensions(selectedAsset, project.canvasWidth, project.canvasHeight, fitMode);
+    execute(
+      new TransformClipCommand(
+        selectedClip.id,
+        {
+          x: selectedClip.x,
+          y: selectedClip.y,
+          width: selectedClip.width,
+          height: selectedClip.height,
+          fitMode: selectedClip.fitMode,
+        },
+        {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          fitMode,
+        },
+      ),
+    );
   };
 
   return (
@@ -38,6 +72,26 @@ export const PropertiesPanel: React.FC = () => {
         <div>
           <h4 className="text-sm font-semibold text-text-primary mb-3">Transform</h4>
           <div className="space-y-2">
+            {isVisualClip && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-text-muted block mb-1">Fit Mode</label>
+                  <select value={selectedClip.fitMode ?? "cover"} onChange={(e) => handleApplyFit(e.target.value as ClipFitModeExtended)} className="w-full bg-surface-raised border border-border rounded px-2 py-1 text-xs text-text-primary">
+                    <option value="contain">Contain</option>
+                    <option value="cover">Cover</option>
+                    <option value="fill">Fill</option>
+                    <option value="stretch">Stretch</option>
+                    <option value="original">Original</option>
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <button type="button" onClick={() => handleApplyFit(selectedClip.fitMode ?? "cover")} className="w-full bg-surface-raised border border-border rounded px-2 py-1 text-xs text-text-primary hover:bg-white/6 transition-colors">
+                    Reset Transform
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs text-text-muted block mb-1">X</label>
@@ -84,12 +138,12 @@ export const PropertiesPanel: React.FC = () => {
           <div className="space-y-2">
             <div>
               <label className="text-xs text-text-muted block mb-1">Speed</label>
-              <select className="w-full bg-surface-raised border border-border rounded px-2 py-1 text-xs text-text-primary">
-                <option>0.25x</option>
-                <option>0.5x</option>
-                <option selected>1x</option>
-                <option>1.5x</option>
-                <option>2x</option>
+              <select defaultValue="1x" className="w-full bg-surface-raised border border-border rounded px-2 py-1 text-xs text-text-primary">
+                <option value="0.25x">0.25x</option>
+                <option value="0.5x">0.5x</option>
+                <option value="1x">1x</option>
+                <option value="1.5x">1.5x</option>
+                <option value="2x">2x</option>
               </select>
             </div>
 
