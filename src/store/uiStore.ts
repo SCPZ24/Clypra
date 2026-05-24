@@ -44,9 +44,9 @@ interface UIStore {
   showNewProjectModal: boolean;
   showSettingsModal: boolean;
 
-  // Preview mode state
   previewMode: "program" | "source";
-  sourceAsset: MediaAsset | null;
+  sourceAsset: (MediaAsset & { type: "video" | "audio" | "image" | "text" }) | null;
+  sourceTextPreset: any | null;
   sourceInPoint: number | null;
   sourceOutPoint: number | null;
 
@@ -73,6 +73,7 @@ interface UIStore {
 
   // Preview mode actions
   previewAsset: (asset: MediaAsset) => void;
+  previewTextPreset: (preset: any, type: "effect" | "template") => void;
   exitSourceMode: () => void;
   markSourceIn: (time: number | null) => void;
   markSourceOut: (time: number | null) => void;
@@ -103,9 +104,9 @@ export const useUIStore = create<UIStore>((set, get) => ({
   showNewProjectModal: false,
   showSettingsModal: false,
 
-  // Preview mode state
   previewMode: "program",
   sourceAsset: null,
+  sourceTextPreset: null,
   sourceInPoint: null,
   sourceOutPoint: null,
 
@@ -177,10 +178,28 @@ export const useUIStore = create<UIStore>((set, get) => ({
   previewAsset: (asset) => {
     set({
       previewMode: "source",
-      sourceAsset: asset,
+      sourceAsset: asset as any,
       sourceInPoint: null,
       sourceOutPoint: null,
       previewMediaId: asset.id,
+    });
+  },
+
+  previewTextPreset: (preset, type) => {
+    set({
+      previewMode: "source",
+      sourceAsset: {
+        id: preset.id,
+        name: preset.name || preset.defaultText || "Text",
+        type: "text",
+        path: "",
+        duration: 3.0,
+        size: 0,
+      } as any,
+      sourceTextPreset: { ...preset, presetType: type },
+      sourceInPoint: null,
+      sourceOutPoint: null,
+      previewMediaId: preset.id,
     });
   },
 
@@ -188,6 +207,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
     set({
       previewMode: "program",
       sourceAsset: null,
+      sourceTextPreset: null,
       sourceInPoint: null,
       sourceOutPoint: null,
       previewMediaId: null,

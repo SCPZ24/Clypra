@@ -296,4 +296,49 @@ describe("Text Layer Evaluation", () => {
       expect(layer.color).toBe("#ff0000");
     }
   });
+
+  it("evaluates custom stroke, shadow, and background styles", () => {
+    const textClip: TextClip = {
+      id: "text-styled",
+      trackId: "t1",
+      mediaId: "",
+      startTime: 0,
+      duration: 5,
+      trimIn: 0,
+      trimOut: 5,
+      x: 100,
+      y: 100,
+      width: 400,
+      height: 100,
+      opacity: 1.0,
+      rotation: 0,
+      text: "Styled Text",
+      fontSize: 32,
+      fontFamily: "Outfit",
+      color: "#ffffff",
+      fontWeight: "bold",
+      fontStyle: "normal",
+      align: "center",
+      valign: "middle",
+      lineHeight: 1.2,
+      letterSpacing: 2,
+      paddingX: 16,
+      paddingY: 16,
+      stroke: { color: "#ff0000", width: 6 },
+      shadow: { color: "#00ff00", blur: 15, offsetX: 2, offsetY: 2 },
+      background: { color: "#000000", padding: 12, borderRadius: 8 },
+    };
+
+    const scene = evaluateScene(2, [textClip as any], tracks, [], project);
+    expect(scene.visualLayers).toHaveLength(1);
+
+    const layer = scene.visualLayers[0];
+    expect(layer.layerType).toBe("text");
+    if (layer.layerType === "text") {
+      expect(layer.stroke).toEqual({ color: "#ff0000", width: 6 });
+      expect(layer.shadow).toEqual({ color: "#00ff00", blur: 15, offsetX: 2, offsetY: 2 });
+      expect(layer.background).toEqual({ color: "#000000", padding: 12, borderRadius: 8 });
+      expect(layer.letterSpacing).toBe(2);
+    }
+  });
 });

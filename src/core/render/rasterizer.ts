@@ -359,7 +359,6 @@ function rasterizeTextLayer(ctx: CanvasRenderingContext2D | OffscreenCanvasRende
   const fontFamily = layer.fontFamily;
 
   ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
-  ctx.fillStyle = layer.color;
 
   // Apply letter spacing if specified
   if (layer.letterSpacing !== 0) {
@@ -407,11 +406,65 @@ function rasterizeTextLayer(ctx: CanvasRenderingContext2D | OffscreenCanvasRende
       break;
   }
 
+  // Setup fillStyle (support multi-color comma-separated gradients)
+  if (layer.color.includes(",")) {
+    const colors = layer.color.split(",");
+    const gradient = ctx.createLinearGradient(0, startY - lineHeight / 2, 0, startY + totalHeight - lineHeight / 2);
+    colors.forEach((color, idx) => {
+      gradient.addColorStop(idx / (colors.length - 1), color.trim());
+    });
+    ctx.fillStyle = gradient;
+  } else {
+    ctx.fillStyle = layer.color;
+  }
+
   // Enable clipping to prevent text overflow
   ctx.save();
   ctx.beginPath();
   ctx.rect(-width / 2, -height / 2, width, height);
   ctx.clip();
+
+  // Draw background box if specified
+  if (layer.background) {
+    const bgPadding = (layer.background.padding ?? 12) * scaleX;
+    const bgRadius = (layer.background.borderRadius ?? 6) * scaleX;
+    const maxLineWidth = Math.max(...lines.map((line) => ctx.measureText(line).width), 10);
+    const bgWidth = maxLineWidth + bgPadding * 2;
+    const bgHeight = totalHeight + bgPadding * 2;
+
+    let bgX: number;
+    switch (layer.textAlign) {
+      case "left":
+        bgX = -width / 2 - bgPadding;
+        break;
+      case "right":
+        bgX = width / 2 - maxLineWidth - bgPadding;
+        break;
+      case "center":
+      default:
+        bgX = -maxLineWidth / 2 - bgPadding;
+        break;
+    }
+
+    const bgY = startY - lineHeight / 2 - bgPadding;
+
+    ctx.save();
+    ctx.fillStyle = layer.background.color;
+    ctx.beginPath();
+    // Use manual rounded rect drawing for universal compatibility (OffscreenCanvas in older webviews)
+    ctx.moveTo(bgX + bgRadius, bgY);
+    ctx.lineTo(bgX + bgWidth - bgRadius, bgY);
+    ctx.quadraticCurveTo(bgX + bgWidth, bgY, bgX + bgWidth, bgY + bgRadius);
+    ctx.lineTo(bgX + bgWidth, bgY + bgHeight - bgRadius);
+    ctx.quadraticCurveTo(bgX + bgWidth, bgY + bgHeight, bgX + bgWidth - bgRadius, bgY + bgHeight);
+    ctx.lineTo(bgX + bgRadius, bgY + bgHeight);
+    ctx.quadraticCurveTo(bgX, bgY + bgHeight, bgX, bgY + bgHeight - bgRadius);
+    ctx.lineTo(bgX, bgY + bgRadius);
+    ctx.quadraticCurveTo(bgX, bgY, bgX + bgRadius, bgY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
 
   // Draw each line
   for (let i = 0; i < lines.length; i++) {

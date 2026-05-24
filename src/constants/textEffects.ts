@@ -1,0 +1,268 @@
+/**
+ * Premium Text Effects Catalog
+ *
+ * 20 highly stylized preset text effects inspired by premium design aesthetics.
+ * Each effect contains standard typography settings compatible with Clypra's text renderer.
+ *
+ * Note: All effects are fully free.
+ */
+
+export interface TextEffectPreset {
+  id: string;
+  name: string;
+  category: "Trending" | "Classic" | "NEW" | "Hits" | "Animation" | "Food" | "Textile Art" | "Manuscript" | "Metal";
+  fontFamily: string;
+  color: string; // supports solid hex or comma-separated vertical gradients
+  fontWeight: "normal" | "bold" | number;
+  fontStyle: "normal" | "italic";
+  stroke?: {
+    color: string;
+    width: number;
+  };
+  shadow?: {
+    color: string;
+    blur: number;
+    offsetX: number;
+    offsetY: number;
+  };
+  background?: {
+    color: string;
+    padding: number;
+    borderRadius: number;
+  };
+  premium?: boolean;
+}
+
+export const TEXT_EFFECTS: TextEffectPreset[] = [
+  {
+    id: "glow-yellow",
+    name: "Clypra",
+    category: "Trending",
+    fontFamily: "Outfit",
+    color: "#ffffff",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#000000", width: 6 },
+    shadow: { color: "#ffff00", blur: 18, offsetX: 0, offsetY: 0 },
+  },
+  {
+    id: "neon-red",
+    name: "Clypra",
+    category: "Trending",
+    fontFamily: "Outfit",
+    color: "#ffffff",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#ff1e1e", width: 6 },
+    shadow: { color: "#ff1e1e", blur: 18, offsetX: 0, offsetY: 0 },
+  },
+  {
+    id: "classic-gold",
+    name: "Clypra",
+    category: "Classic",
+    fontFamily: "Outfit",
+    color: "#ffe066, #b38600",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#4d3300", width: 4 },
+    shadow: { color: "rgba(0, 0, 0, 0.6)", blur: 10, offsetX: 3, offsetY: 5 },
+  },
+  {
+    id: "retro-sunset",
+    name: "Clypra",
+    category: "Trending",
+    fontFamily: "Poppins",
+    color: "#ff3e00, #ff0077, #aa00ff",
+    fontWeight: "bold",
+    fontStyle: "italic",
+    stroke: { color: "#000000", width: 3 },
+    shadow: { color: "#000000", blur: 0, offsetX: 6, offsetY: 6 },
+  },
+  {
+    id: "bubblegum-pink",
+    name: "Clypra",
+    category: "NEW",
+    fontFamily: "Poppins",
+    color: "#ffffff",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#ff66cc", width: 8 },
+    shadow: { color: "#ff0099", blur: 4, offsetX: 0, offsetY: 4 },
+  },
+  {
+    id: "3d-wood",
+    name: "Clypra",
+    category: "Classic",
+    fontFamily: "Roboto",
+    color: "#d2b48c, #8b5a2b",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#3d2314", width: 5 },
+    shadow: { color: "rgba(0,0,0,0.5)", blur: 8, offsetX: 4, offsetY: 4 },
+  },
+  {
+    id: "cyber-neon",
+    name: "Clypra",
+    category: "Trending",
+    fontFamily: "Outfit",
+    color: "#00ffff",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#ff00ff", width: 5 },
+    shadow: { color: "#ff00ff", blur: 15, offsetX: 0, offsetY: 0 },
+  },
+  {
+    id: "midnight-glow",
+    name: "Clypra",
+    category: "Hits",
+    fontFamily: "Inter",
+    color: "#120a2a",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#00ffcc", width: 4 },
+    shadow: { color: "#00ffcc", blur: 12, offsetX: 0, offsetY: 0 },
+  },
+  {
+    id: "glitch-tech",
+    name: "Clypra",
+    category: "NEW",
+    fontFamily: "Outfit",
+    color: "#ffffff",
+    fontWeight: 700,
+    fontStyle: "normal",
+    stroke: { color: "#0f0f14", width: 4 },
+    shadow: { color: "#ff0055", blur: 8, offsetX: -4, offsetY: 0 },
+  },
+  {
+    id: "comic-book",
+    name: "Clypra",
+    category: "Hits",
+    fontFamily: "Poppins",
+    color: "#ffd700",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#000000", width: 8 },
+    shadow: { color: "#000000", blur: 0, offsetX: 6, offsetY: 0 },
+  },
+  {
+    id: "graffiti-splash",
+    name: "Clypra",
+    category: "NEW",
+    fontFamily: "Outfit",
+    color: "#39ff14",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#000000", width: 6 },
+    background: { color: "rgba(0,0,0,0.8)", padding: 12, borderRadius: 8 },
+  },
+  {
+    id: "silver-chrome",
+    name: "Clypra",
+    category: "Metal",
+    fontFamily: "Outfit",
+    color: "#ffffff, #999999, #eeeeee",
+    fontWeight: "bold",
+    fontStyle: "italic",
+    stroke: { color: "#444444", width: 3 },
+    shadow: { color: "rgba(255,255,255,0.4)", blur: 8, offsetX: 0, offsetY: 0 },
+  },
+  {
+    id: "frozen-ice",
+    name: "Clypra",
+    category: "Food",
+    fontFamily: "Outfit",
+    color: "#e6ffff, #80e5ff",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#0088cc", width: 4 },
+    shadow: { color: "#e6ffff", blur: 10, offsetX: 0, offsetY: 0 },
+  },
+  {
+    id: "fire-flame",
+    name: "Clypra",
+    category: "Trending",
+    fontFamily: "Poppins",
+    color: "#ffff00, #ff3300",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#660000", width: 5 },
+    shadow: { color: "#ff6600", blur: 15, offsetX: 0, offsetY: -2 },
+  },
+  {
+    id: "candy-rainbow",
+    name: "Clypra",
+    category: "Hits",
+    fontFamily: "Poppins",
+    color: "#ff007f, #aa00ff, #00c8ff, #00ff66",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#111111", width: 4 },
+    shadow: { color: "rgba(0,0,0,0.3)", blur: 4, offsetX: 2, offsetY: 2 },
+  },
+  {
+    id: "vintage-newspaper",
+    name: "Clypra",
+    category: "Manuscript",
+    fontFamily: "Roboto",
+    color: "#111111",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#f5f5dc", width: 2 },
+    shadow: { color: "rgba(0,0,0,0.15)", blur: 5, offsetX: 3, offsetY: 3 },
+  },
+  {
+    id: "acid-lime",
+    name: "Clypra",
+    category: "NEW",
+    fontFamily: "Outfit",
+    color: "#dfff11",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#0a0c00", width: 7 },
+    shadow: { color: "#0a0c00", blur: 0, offsetX: 4, offsetY: 4 },
+  },
+  {
+    id: "electric-blue",
+    name: "Clypra",
+    category: "Trending",
+    fontFamily: "Outfit",
+    color: "#00dfff",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#0033cc", width: 6 },
+    shadow: { color: "#00dfff", blur: 14, offsetX: 0, offsetY: 0 },
+  },
+  {
+    id: "barbie-dream",
+    name: "Clypra",
+    category: "NEW",
+    fontFamily: "Poppins",
+    color: "#ff99cc, #ff007f",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#ffffff", width: 5 },
+    shadow: { color: "#ff007f", blur: 10, offsetX: 0, offsetY: 0 },
+  },
+  {
+    id: "royal-emerald",
+    name: "Clypra",
+    category: "Classic",
+    fontFamily: "Roboto",
+    color: "#006633, #00cc66",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#d4af37", width: 3 },
+    shadow: { color: "rgba(0,0,0,0.5)", blur: 8, offsetX: 2, offsetY: 4 },
+  },
+  {
+    id: "carbon-tech",
+    name: "Clypra",
+    category: "Metal",
+    fontFamily: "Inter",
+    color: "#333333",
+    fontWeight: "bold",
+    fontStyle: "normal",
+    stroke: { color: "#ff3300", width: 3 },
+    background: { color: "#111111", padding: 10, borderRadius: 4 },
+  },
+];

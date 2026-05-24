@@ -1,14 +1,15 @@
 import React, { useState } from "react";
-import { Music, Type, Smile, Wand2, Shuffle, MessageSquare, Folder } from "lucide-react";
+import { Music, Smile, Wand2, Shuffle, MessageSquare } from "lucide-react";
 import { MediaTab, AudioTab, TextTab, StickersTab, EffectsTab, TransitionsTab, CaptionsTab, type TabType, MediaTabProps } from "./media-tabs";
+import { TextIcon, YouTubeIcon } from "../ui/icons";
 
 export const EnhancedMediaPanel: React.FC<MediaTabProps> = ({ onAddToTimeline }) => {
   const [activeTab, setActiveTab] = useState<TabType>("media");
 
   const tabs = [
-    { id: "media" as const, icon: Folder, label: "Media" },
+    { id: "media" as const, icon: YouTubeIcon, label: "Media" },
     { id: "audio" as const, icon: Music, label: "Audio" },
-    { id: "text" as const, icon: Type, label: "Text" },
+    { id: "text" as const, icon: TextIcon, label: "Text" },
     { id: "stickers" as const, icon: Smile, label: "Stickers" },
     { id: "effects" as const, icon: Wand2, label: "Effects" },
     { id: "transitions" as const, icon: Shuffle, label: "Transitions" },
@@ -16,7 +17,7 @@ export const EnhancedMediaPanel: React.FC<MediaTabProps> = ({ onAddToTimeline })
   ];
 
   return (
-    <div className="w-[23rem] min-h-0 panel-shell flex flex-col overflow-hidden shrink-0">
+    <div className="w-92 min-h-0 panel-shell flex flex-col overflow-hidden shrink-0">
       {/* Tab Navigation */}
       <div className="panel-head border-b border-border">
         <div
@@ -30,8 +31,8 @@ export const EnhancedMediaPanel: React.FC<MediaTabProps> = ({ onAddToTimeline })
           {tabs.map((tab) => {
             const Icon = tab.icon;
             return (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap border-b-2 cursor-pointer ${activeTab === tab.id ? "text-accent border-accent" : "text-text-muted border-transparent hover:text-text-primary"}`}>
-                <Icon className="w-4 h-4" />
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center flex-col gap-0.5 px-2 py-1 text-[10px] font-medium transition-colors whitespace-nowrap cursor-pointer hover:text-accent ${activeTab === tab.id ? "text-accent" : "text-text-muted"}`}>
+                <Icon size={14} />
                 {tab.label}
               </button>
             );

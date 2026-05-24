@@ -142,6 +142,23 @@ export interface TextClip extends Clip {
   maxWidth?: number;
   paddingX: number;
   paddingY: number;
+  styleId?: string;
+  templateId?: string;
+  stroke?: {
+    color: string;
+    width: number;
+  };
+  shadow?: {
+    color: string;
+    blur: number;
+    offsetX: number;
+    offsetY: number;
+  };
+  background?: {
+    color: string;
+    padding: number;
+    borderRadius: number;
+  };
   // Inherited from Clip: x, y, width, height, rotation, opacity
 }
 

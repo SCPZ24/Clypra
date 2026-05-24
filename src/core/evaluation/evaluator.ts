@@ -114,7 +114,7 @@ export function evaluateScene(time: number, clips: Clip[], tracks: Track[], asse
 
         // Text content
         text: textClip.text || "Text",
-        fontFamily: textClip.fontFamily || "Inter, system-ui, sans-serif",
+        fontFamily: normalizeFontFamily(textClip.fontFamily || "Inter Variable"),
         fontSize: textClip.fontSize || 48,
         color: textClip.color || "#ffffff",
         fontWeight: (textClip.fontWeight || "normal") as "normal" | "bold" | number,
@@ -123,6 +123,9 @@ export function evaluateScene(time: number, clips: Clip[], tracks: Track[], asse
         verticalAlign: textClip.valign || "middle",
         lineHeight: textClip.lineHeight || 1.2,
         letterSpacing: textClip.letterSpacing || 0,
+        stroke: textClip.stroke,
+        shadow: textClip.shadow,
+        background: textClip.background,
       };
 
       visualLayers.push(textLayer);
@@ -370,3 +373,17 @@ export function clearEvaluationCache() {
 export function invalidateEvaluationCache(epoch: number) {
   getEvaluationCache().invalidateEpoch(epoch);
 }
+
+/**
+ * Helper to resolve and normalize font family strings to exact loaded Fontsource font stacks.
+ */
+export function normalizeFontFamily(family: string): string {
+  const f = family.toLowerCase();
+  if (f === "inter") return "Inter";
+  if (f.includes("outfit")) return "Outfit";
+  if (f.includes("poppins")) return "Poppins";
+  if (f.includes("roboto")) return "Roboto";
+  if (f.includes("inter")) return "Inter Variable";
+  return family;
+}
+

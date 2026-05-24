@@ -102,6 +102,17 @@ export const EditorLayout: React.FC = () => {
         canvasWidth: project?.canvasWidth || 1920,
         canvasHeight: project?.canvasHeight || 1080,
         ...presetConfig,
+        // Map styling properties from custom text tab effects or templates
+        fontFamily: item.fontFamily,
+        color: item.color,
+        fontSize: item.fontSize,
+        fontWeight: item.fontWeight,
+        fontStyle: item.fontStyle,
+        stroke: item.stroke,
+        shadow: item.shadow,
+        background: item.background,
+        styleId: item.styleId,
+        templateId: item.templateId,
       });
 
       addClip(textClip);
@@ -112,7 +123,7 @@ export const EditorLayout: React.FC = () => {
   };
 
   return (
-    <div className="w-full h-full flex flex-col app-shell overflow-hidden p-1 gap-2">
+    <div className="w-full h-full flex flex-col app-shell overflow-hidden p-1">
       <TopBar />
 
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden gap-2">

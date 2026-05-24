@@ -41,13 +41,42 @@ export interface CreateTextClipOptions {
 
   /** Position preset */
   position?: "center" | "top" | "bottom" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+  // Additional style parameters for custom presets/effects/templates
+  styleId?: string;
+  templateId?: string;
+  fontWeight?: string | number;
+  fontStyle?: "normal" | "italic";
+  stroke?: { color: string; width: number };
+  shadow?: { color: string; blur: number; offsetX: number; offsetY: number };
+  background?: { color: string; padding: number; borderRadius: number };
 }
 
 /**
  * Create a text clip with sensible defaults.
  */
 export function createTextClip(options: CreateTextClipOptions): TextClip {
-  const { trackId, startTime, duration = 5.0, text = "Text", canvasWidth, canvasHeight, fontSize = 48, fontFamily = "Inter, system-ui, sans-serif", color = "#ffffff", bold = false, italic = false, position = "center" } = options;
+  const {
+    trackId,
+    startTime,
+    duration = 5.0,
+    text = "Text",
+    canvasWidth,
+    canvasHeight,
+    fontSize = 48,
+    fontFamily = "Inter, system-ui, sans-serif",
+    color = "#ffffff",
+    bold = false,
+    italic = false,
+    position = "center",
+    styleId,
+    templateId,
+    fontWeight,
+    fontStyle,
+    stroke,
+    shadow,
+    background,
+  } = options;
 
   // Calculate position based on preset
   const { x, y, width, height } = calculateTextPosition(position, canvasWidth, canvasHeight, fontSize);
@@ -70,14 +99,19 @@ export function createTextClip(options: CreateTextClipOptions): TextClip {
     fontSize,
     fontFamily,
     color,
-    fontWeight: bold ? "bold" : "normal",
-    fontStyle: italic ? "italic" : "normal",
+    fontWeight: fontWeight || (bold ? "bold" : "normal"),
+    fontStyle: fontStyle || (italic ? "italic" : "normal"),
     align: "center",
     valign: "middle",
     lineHeight: 1.2,
     letterSpacing: 0,
     paddingX: 16,
     paddingY: 16,
+    styleId,
+    templateId,
+    stroke,
+    shadow,
+    background,
   };
 }
 
