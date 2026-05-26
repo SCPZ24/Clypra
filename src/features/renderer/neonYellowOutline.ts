@@ -6,72 +6,58 @@ import { applyFontConfig } from "./helpers";
  * White body, crisp black stroke, and dual radiating yellow bloom glows.
  * Renders glows using modern hardware-accelerated Canvas context blurs to bypass WebKit native text shadow clipping.
  */
-export const renderNeonYellowOutline = (
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  text: string,
-  effect: TextEffectDefinition,
-  fontSize: number,
-  x: number,
-  y: number,
-  canvasWidth: number,
-  canvasHeight: number,
-  lines: string[],
-  lineHeightPx: number,
-  textWidth: number,
-  textHeight: number
-) => {
+export const renderNeonYellowOutline = (ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, text: string, effect: TextEffectDefinition, fontSize: number, x: number, y: number, canvasWidth: number, canvasHeight: number, lines: string[], lineHeightPx: number, textWidth: number, textHeight: number) => {
   if (!effect.neonYellowOutline || !effect.neonYellowOutline.enabled) return;
   const config = effect.neonYellowOutline;
 
   applyFontConfig(ctx, effect.font, fontSize);
 
-  // Phase 1: Draw Wide Glow (Blur 10)
+  // Phase 1: Draw Wide Outer Glow (soft diffused halo)
   ctx.save();
-  ctx.globalAlpha = 0.4;
-  if (config.glowWideBlur > 0) {
-    (ctx as any).filter = `blur(${config.glowWideBlur}px)`;
-  }
+  ctx.globalAlpha = 0.5;
+  (ctx as any).filter = `blur(${config.glowWideBlur}px)`;
+
   lines.forEach((line, index) => {
     const lineY = y - ((lines.length - 1) * lineHeightPx) / 2 + index * lineHeightPx;
-    
-    // Grow wide glow from stroke shape
+
     ctx.strokeStyle = config.glowColor;
-    ctx.lineWidth = config.strokeWidth * 2;
+    ctx.lineWidth = config.strokeWidth * 4.5;
     ctx.lineJoin = "round";
     ctx.strokeText(line, x, lineY);
-
-    // Fill shape for center density
-    ctx.fillStyle = config.glowColor;
-    ctx.fillText(line, x, lineY);
   });
   ctx.restore();
 
-  // Phase 2: Draw Tight Glow (Blur 4)
+  // Phase 2: Draw Medium Glow (middle transition)
   ctx.save();
-  ctx.globalAlpha = 0.9;
-  if (config.glowTightBlur > 0) {
-    (ctx as any).filter = `blur(${config.glowTightBlur}px)`;
-  }
-  
-  // Double-pass iterations for tight glow spread/opacity simulation
-  for (let i = 0; i < 2; i++) {
-    lines.forEach((line, index) => {
-      const lineY = y - ((lines.length - 1) * lineHeightPx) / 2 + index * lineHeightPx;
-      
-      // Grow tight glow from stroke shape
-      ctx.strokeStyle = config.glowColor;
-      ctx.lineWidth = config.strokeWidth * 2;
-      ctx.lineJoin = "round";
-      ctx.strokeText(line, x, lineY);
+  ctx.globalAlpha = 0.6;
+  (ctx as any).filter = `blur(${Math.floor(config.glowWideBlur * 0.6)}px)`;
 
-      // Fill shape for core density
-      ctx.fillStyle = config.glowColor;
-      ctx.fillText(line, x, lineY);
-    });
-  }
+  lines.forEach((line, index) => {
+    const lineY = y - ((lines.length - 1) * lineHeightPx) / 2 + index * lineHeightPx;
+
+    ctx.strokeStyle = config.glowColor;
+    ctx.lineWidth = config.strokeWidth * 3.5;
+    ctx.lineJoin = "round";
+    ctx.strokeText(line, x, lineY);
+  });
   ctx.restore();
 
-  // Phase 3: Draw Crisp Black Outside Stroke
+  // Phase 3: Draw Tight Inner Glow (just outside black stroke)
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  (ctx as any).filter = `blur(${config.glowTightBlur}px)`;
+
+  lines.forEach((line, index) => {
+    const lineY = y - ((lines.length - 1) * lineHeightPx) / 2 + index * lineHeightPx;
+
+    ctx.strokeStyle = config.glowColor;
+    ctx.lineWidth = config.strokeWidth * 2.5;
+    ctx.lineJoin = "round";
+    ctx.strokeText(line, x, lineY);
+  });
+  ctx.restore();
+
+  // Phase 4: Draw Crisp Black Outside Stroke
   ctx.save();
   ctx.strokeStyle = config.strokeColor;
   ctx.lineWidth = config.strokeWidth * 2;
@@ -83,7 +69,7 @@ export const renderNeonYellowOutline = (
   });
   ctx.restore();
 
-  // Phase 4: Draw White Text Body Fill
+  // Phase 5: Draw White Text Body Fill
   ctx.save();
   ctx.fillStyle = config.fillColor;
   lines.forEach((line, index) => {
