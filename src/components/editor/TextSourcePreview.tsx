@@ -1,17 +1,20 @@
-import { useRef, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { LottiePlayer } from "@/features/text-templates/LottiePlayer";
 import { renderTextEffect } from "@/features/renderer/renderer";
 import { allEffects } from "@/features/renderer/definitions";
 
 export const TextSourcePreview: React.FC<{ preset: any }> = ({ preset }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
+  const canvasRef = useCallback((node: HTMLCanvasElement | null) => {
+    setCanvas(node);
+  }, []);
+
   const previewText = "Default text";
   const isTemplate = preset?.presetType === "template" || !!preset?.lottieData;
   const styleId = preset?.styleId || preset?.id;
   const premiumEffect = styleId ? allEffects.find((e) => e.id === styleId) : null;
 
   useEffect(() => {
-    const canvas = canvasRef.current;
     if (!canvas || !premiumEffect || isTemplate) return;
     canvas.width = 640;
     canvas.height = 360;
@@ -24,7 +27,7 @@ export const TextSourcePreview: React.FC<{ preset: any }> = ({ preset }) => {
         renderTextEffect(canvas, previewText, premiumEffect, 44);
       });
     }
-  }, [previewText, premiumEffect, isTemplate]);
+  }, [canvas, previewText, premiumEffect, isTemplate]);
 
   if (!preset) return null;
 

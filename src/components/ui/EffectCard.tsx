@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Download, Star } from "lucide-react";
 import { type TextEffectPreset } from "@/constants/textEffects";
 import { renderTextEffect } from "@/features/renderer/renderer";
@@ -15,11 +15,13 @@ interface EffectCardProps {
 
 export const EffectCard: React.FC<EffectCardProps> = ({ effect, isFavorite, isDownloading, onFavorite, onApply, onPreview }) => {
   const premiumEffect = allEffects.find((e) => e.id === effect.id);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
+  const canvasRef = useCallback((node: HTMLCanvasElement | null) => {
+    setCanvas(node);
+  }, []);
 
   useEffect(() => {
-    if (premiumEffect && canvasRef.current) {
-      const canvas = canvasRef.current;
+    if (premiumEffect && canvas) {
       canvas.width = 250;
       canvas.height = 100;
       renderTextEffect(canvas, "Default text", premiumEffect, 22);
@@ -30,7 +32,7 @@ export const EffectCard: React.FC<EffectCardProps> = ({ effect, isFavorite, isDo
         });
       }
     }
-  }, [effect, premiumEffect]);
+  }, [canvas, effect, premiumEffect]);
 
   return (
     <div onClick={onPreview} className="w-full aspect-square bg-surface-raised/40 hover:bg-surface-raised/80 border border-border/40 hover:border-accent/40 rounded-xl relative overflow-hidden flex flex-col justify-between p-2.5 transition-all duration-300 group cursor-pointer">
