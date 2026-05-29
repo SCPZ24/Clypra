@@ -21,6 +21,7 @@ import { usePlaybackClock, usePlaybackControls, useTransportControls, getPlaybac
 import { useProjectStore } from "@/store/projectStore";
 import { useTimelineStore } from "@/store/timelineStore";
 import { useUIStore } from "@/store/uiStore";
+import { useSettingsStore } from "@/store/settingsStore";
 import { evaluateSceneCached } from "@/core/evaluation/evaluator";
 import { getFrameScheduler } from "@/core/scheduler/FrameScheduler";
 import { getActiveSessionOrNull, subscribeToSessionChanges } from "@/core/runtime/ProjectSession";
@@ -52,32 +53,6 @@ const CANVAS_DIMENSIONS: Record<Exclude<AspectRatio, "original">, { width: numbe
   "1:1": { width: 1080, height: 1080 },
   "4:5": { width: 1080, height: 1350 },
 };
-
-// function previewAspectWidthOverHeight(preset: AspectRatio, canvasWidth: number, canvasHeight: number): number {
-//   const ch = Math.max(1, canvasHeight);
-//   if (preset === "original") {
-//     return canvasWidth / ch;
-//   }
-//   return PREVIEW_ASPECT_RATIO[preset] ?? canvasWidth / ch;
-// }
-
-// function resolveOriginalPreviewAspect(layers: readonly { mediaId: string }[], mediaAssets: Array<{ id: string; width?: number; height?: number }>, canvasWidth: number, canvasHeight: number): number {
-//   // Always return sequence aspect ratio
-//   // The sequence is the coordinate universe - it doesn't change based on clips
-//   return canvasWidth / Math.max(1, canvasHeight);
-// }
-
-// /** Largest rectangle with aspect W/H = R inside the panel. */
-// function previewViewportSize(panelWidth: number, panelHeight: number, widthOverHeight: number): { vw: number; vh: number } {
-//   const R = widthOverHeight;
-//   let vw = Math.min(panelWidth, panelHeight * R);
-//   let vh = vw / R;
-//   if (vh > panelHeight + 0.5) {
-//     vh = panelHeight;
-//     vw = vh * R;
-//   }
-//   return { vw: Math.max(1, vw), vh: Math.max(1, vh) };
-// }
 
 function PreviewAspectShapeIcon({ widthOverHeight }: { widthOverHeight: number }) {
   const max = 22;
@@ -119,6 +94,9 @@ const ProgramPreview: React.FC = () => {
   const { previewViewport } = useUIStore();
   const activeSession = useSyncExternalStore(subscribeToSessionChanges, getActiveSessionOrNull, () => null);
 
+  const previewQuality = useSettingsStore((s) => s.previewQuality);
+  const setPreviewQuality = useSettingsStore((s) => s.setPreviewQuality);
+
   // =========================================================================
   // 2. CORE REACT & PLAYBACK HOOKS
   // =========================================================================
@@ -137,6 +115,7 @@ const ProgramPreview: React.FC = () => {
   const [previewAspectPreset, setPreviewAspectPreset] = useState<AspectRatio>("original");
   const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
   const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
   const [useCanvasPreview] = useState(true);
   const [telemetryStats, setTelemetryStats] = useState<{
@@ -156,6 +135,7 @@ const ProgramPreview: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const aspectMenuRef = useRef<HTMLDivElement>(null);
   const speedMenuRef = useRef<HTMLDivElement>(null);
+  const qualityMenuRef = useRef<HTMLDivElement>(null);
   const gpuCacheRef = useRef<GPUTextureCache | null>(null);
   const gpuFallbackRef = useRef(false);
   const qualityManagerRef = useRef<PreviewQualityManager | null>(null);
@@ -168,7 +148,7 @@ const ProgramPreview: React.FC = () => {
   const originalCanvasDimsRef = useRef<{ width: number; height: number } | null>(null);
   const prevDurationRef = useRef<number>(0);
   const prevFrameRateRef = useRef<number>(0);
-  
+
   const renderStateRef = useRef({
     clips,
     tracks,
@@ -182,6 +162,7 @@ const ProgramPreview: React.FC = () => {
     displayWidth: 0,
     displayHeight: 0,
     dpr: window.devicePixelRatio || 1,
+    previewQuality,
   });
 
   // Sync refs on every render
@@ -194,6 +175,7 @@ const ProgramPreview: React.FC = () => {
   renderStateRef.current.clock = clock;
   renderStateRef.current.clockState = clockState;
   renderStateRef.current.dpr = window.devicePixelRatio || 1;
+  renderStateRef.current.previewQuality = previewQuality;
 
   // =========================================================================
   // 5. VIEWPORT CONTROL HOOKS & DERIVATIONS
@@ -209,13 +191,7 @@ const ProgramPreview: React.FC = () => {
   // 6. DERIVED MEMOIZED VALUES (useMemo)
   // =========================================================================
   const displayTransform = useMemo(() => {
-    return calculateDisplayTransform(
-      { width: canvasWidth, height: canvasHeight },
-      previewViewport,
-      dimensions.width,
-      dimensions.height,
-      previewScaleMode
-    );
+    return calculateDisplayTransform({ width: canvasWidth, height: canvasHeight }, previewViewport, dimensions.width, dimensions.height, previewScaleMode);
   }, [canvasWidth, canvasHeight, previewViewport, dimensions.width, dimensions.height, previewScaleMode]);
 
   const { scale, offsetX, offsetY, displayWidth, displayHeight } = displayTransform;
@@ -243,7 +219,7 @@ const ProgramPreview: React.FC = () => {
       if (target.closest("[data-playhead]")) return;
       clearSelection();
     },
-    [clearSelection, isPanning, spacePressed]
+    [clearSelection, isPanning, spacePressed],
   );
 
   const selectAspectPreset = useCallback(
@@ -270,7 +246,7 @@ const ProgramPreview: React.FC = () => {
         });
       }
     },
-    [project, updateProject]
+    [project, updateProject],
   );
 
   // =========================================================================
@@ -331,6 +307,17 @@ const ProgramPreview: React.FC = () => {
     document.addEventListener("mousedown", onMouseDown);
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [speedMenuOpen]);
+
+  useEffect(() => {
+    if (!qualityMenuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (qualityMenuRef.current && !qualityMenuRef.current.contains(e.target as Node)) {
+        setQualityMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [qualityMenuOpen]);
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -430,7 +417,7 @@ const ProgramPreview: React.FC = () => {
       scheduler.updateTimeline(state.clips, state.tracks, state.mediaAssets, state.project, state.epoch);
       const qm = qualityManagerRef.current;
       const isPlaying = state.clockState.state === "playing";
-      const qualityTier = qm ? qm.selectTierForInteraction(isPlaying, false, false) : PreviewQualityTier.Idle;
+      const qualityTier = qm ? qm.selectTierForInteraction(isPlaying, false, false, state.previewQuality) : PreviewQualityTier.Idle;
       const profile = qm ? qm.getRenderProfile(qualityTier) : { maxWidth: state.canvasWidth, maxHeight: state.canvasHeight, dprScale: state.dpr, useDpr: true };
       if (gpuCache) {
         const renderW = profile.maxWidth;
@@ -455,51 +442,54 @@ const ProgramPreview: React.FC = () => {
         videoElements: activeVideoElements,
       });
       lastJobId = jobId;
-      scheduler.wait(jobId).then((result) => {
-        isRendering = false;
-        if (!isActive) return;
-        const latestState = renderStateRef.current;
-        if (result.data instanceof ImageBitmap) {
-          if (gpuCache) {
-            const cacheKey = `preview:${latestState.project?.id}:${latestState.epoch}:${timeToRender.toFixed(3)}:${profile.maxWidth}x${profile.maxHeight}:${latestState.dpr}`;
-            gpuCache.uploadTexture(cacheKey, result.data, result.data.width, result.data.height);
-            gpuCache.clear();
-            gpuCache.renderTexture(cacheKey, 0, 0, latestState.displayWidth, latestState.displayHeight);
-            result.data.close();
-            gpuCache.evictLRU(GPU_MEMORY_LIMIT_MB);
-          } else if (ctx2d) {
-            const bitmapW = result.data.width;
-            const bitmapH = result.data.height;
-            const fitScale = Math.min(latestState.displayWidth / bitmapW, latestState.displayHeight / bitmapH);
-            const drawW = bitmapW * fitScale;
-            const drawH = bitmapH * fitScale;
-            const ox = (latestState.displayWidth - drawW) / 2;
-            const oy = (latestState.displayHeight - drawH) / 2;
-            ctx2d.clearRect(0, 0, latestState.displayWidth, latestState.displayHeight);
-            ctx2d.drawImage(result.data, ox, oy, drawW, drawH);
-            result.data.close();
+      scheduler
+        .wait(jobId)
+        .then((result) => {
+          isRendering = false;
+          if (!isActive) return;
+          const latestState = renderStateRef.current;
+          if (result.data instanceof ImageBitmap) {
+            if (gpuCache) {
+              const cacheKey = `preview:${latestState.project?.id}:${latestState.epoch}:${timeToRender.toFixed(3)}:${profile.maxWidth}x${profile.maxHeight}:${latestState.dpr}`;
+              gpuCache.uploadTexture(cacheKey, result.data, result.data.width, result.data.height);
+              gpuCache.clear();
+              gpuCache.renderTexture(cacheKey, 0, 0, latestState.displayWidth, latestState.displayHeight);
+              result.data.close();
+              gpuCache.evictLRU(GPU_MEMORY_LIMIT_MB);
+            } else if (ctx2d) {
+              const bitmapW = result.data.width;
+              const bitmapH = result.data.height;
+              const fitScale = Math.min(latestState.displayWidth / bitmapW, latestState.displayHeight / bitmapH);
+              const drawW = bitmapW * fitScale;
+              const drawH = bitmapH * fitScale;
+              const ox = (latestState.displayWidth - drawW) / 2;
+              const oy = (latestState.displayHeight - drawH) / 2;
+              ctx2d.clearRect(0, 0, latestState.displayWidth, latestState.displayHeight);
+              ctx2d.drawImage(result.data, ox, oy, drawW, drawH);
+              result.data.close();
+            }
           }
-        }
-        const stats = scheduler.getStats();
-        telemetryRef.current = {
-          avgEvaluationTimeMs: stats.avgEvaluationTimeMs,
-          avgRasterTimeMs: stats.avgRasterTimeMs,
-          avgTotalTimeMs: stats.avgTotalTimeMs,
-          cacheHitRate: stats.cacheHitRate,
-          active: stats.active,
-          droppedFrames: droppedFramesRef.current,
-          driftMagnitude: maxDriftRef.current,
-        };
-        const now = performance.now();
-        if (showTelemetryRef.current && now - lastTelemetryFlushRef.current > 250) {
-          lastTelemetryFlushRef.current = now;
-          setTelemetryStats(telemetryRef.current);
-          maxDriftRef.current = 0;
-        }
-      }).catch((error: Error) => {
-        isRendering = false;
-        if (error.message !== "Job cancelled" && isActive) console.error("Failed to render frame:", error);
-      });
+          const stats = scheduler.getStats();
+          telemetryRef.current = {
+            avgEvaluationTimeMs: stats.avgEvaluationTimeMs,
+            avgRasterTimeMs: stats.avgRasterTimeMs,
+            avgTotalTimeMs: stats.avgTotalTimeMs,
+            cacheHitRate: stats.cacheHitRate,
+            active: stats.active,
+            droppedFrames: droppedFramesRef.current,
+            driftMagnitude: maxDriftRef.current,
+          };
+          const now = performance.now();
+          if (showTelemetryRef.current && now - lastTelemetryFlushRef.current > 250) {
+            lastTelemetryFlushRef.current = now;
+            setTelemetryStats(telemetryRef.current);
+            maxDriftRef.current = 0;
+          }
+        })
+        .catch((error: Error) => {
+          isRendering = false;
+          if (error.message !== "Job cancelled" && isActive) console.error("Failed to render frame:", error);
+        });
     };
     rafId = requestAnimationFrame(renderLoop);
     return () => {
@@ -659,33 +649,99 @@ const ProgramPreview: React.FC = () => {
           seek(Math.min(duration, currentTime + step));
         }}
         leftActions={
-          <div className="relative" ref={speedMenuRef}>
-            <button onClick={() => setSpeedMenuOpen((o) => !o)} className="flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors" title="Playback speed" aria-expanded={speedMenuOpen}>
-              <span className="max-w-18 truncate">{playbackSpeed}x</span>
-              <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
-            </button>
-            {speedMenuOpen && (
-              <div className="absolute bottom-full right-0 z-50 mb-1 w-[140px] overflow-hidden rounded-lg border border-border bg-surface py-1 text-text-primary shadow-xl" role="listbox">
-                <div className="px-1">
-                  {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                    <button
-                      key={speed}
-                      type="button"
-                      role="option"
-                      aria-selected={playbackSpeed === speed}
-                      className={cn("flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-text-primary hover:bg-surface-raised", playbackSpeed === speed && "bg-surface-raised")}
-                      onClick={() => {
-                        setSpeed(speed);
-                        setSpeedMenuOpen(false);
-                      }}
-                    >
-                      <span className="flex w-5 shrink-0 justify-center">{playbackSpeed === speed ? <Check className="h-3.5 w-3.5 text-accent" /> : null}</span>
-                      <span className="min-w-0 flex-1 truncate">{speed}x</span>
-                    </button>
-                  ))}
+          <div className="flex items-center gap-1">
+            {/* Speed selection */}
+            <div className="relative" ref={speedMenuRef}>
+              <button onClick={() => setSpeedMenuOpen((o) => !o)} className="flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors" title="Playback speed" aria-expanded={speedMenuOpen}>
+                <span className="max-w-18 truncate">{playbackSpeed}x</span>
+                <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
+              </button>
+              {speedMenuOpen && (
+                <div className="absolute bottom-full right-0 z-50 mb-1 w-[140px] overflow-hidden rounded-lg border border-border bg-surface py-1 text-text-primary shadow-xl" role="listbox">
+                  <div className="px-1">
+                    {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                      <button
+                        key={speed}
+                        type="button"
+                        role="option"
+                        aria-selected={playbackSpeed === speed}
+                        className={cn("flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-text-primary hover:bg-surface-raised", playbackSpeed === speed && "bg-surface-raised")}
+                        onClick={() => {
+                          setSpeed(speed);
+                          setSpeedMenuOpen(false);
+                        }}
+                      >
+                        <span className="flex w-5 shrink-0 justify-center">{playbackSpeed === speed ? <Check className="h-3.5 w-3.5 text-accent" /> : null}</span>
+                        <span className="min-w-0 flex-1 truncate">{speed}x</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+
+            <div className="w-px h-3 bg-white/10 mx-0.5" />
+
+            {/* Playback Quality selection */}
+            <div className="relative" ref={qualityMenuRef}>
+              <button onClick={() => setQualityMenuOpen((o) => !o)} className="flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors" title="Playback quality" aria-expanded={qualityMenuOpen}>
+                <span className="max-w-18 truncate capitalize">
+                  {previewQuality}
+                </span>
+                <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
+              </button>
+              {qualityMenuOpen && (
+                <div className="absolute bottom-full left-0 z-50 mb-1 w-[300px] overflow-hidden rounded-lg border border-border bg-surface py-1.5 text-text-primary shadow-xl" role="listbox">
+                  <div className="px-1.5 space-y-0.5">
+                    {[
+                      {
+                        value: "full",
+                        label: "Full quality",
+                        description: "Original video resolution"
+                      },
+                      {
+                        value: "high",
+                        label: "High quality",
+                        description: "Smooth playback, no impact on exported video"
+                      },
+                      {
+                        value: "medium",
+                        label: "Medium quality",
+                        description: "Smoother playback, no impact on exported video"
+                      },
+                      {
+                        value: "low",
+                        label: "Low quality",
+                        description: "Smoothest playback, no impact on exported video"
+                      }
+                    ].map((q) => (
+                      <button
+                        key={q.value}
+                        type="button"
+                        role="option"
+                        aria-selected={previewQuality === q.value}
+                        className={cn(
+                          "flex w-full items-start gap-2.5 rounded px-2 py-2 text-left hover:bg-surface-raised transition-colors duration-150",
+                          previewQuality === q.value && "bg-surface-raised"
+                        )}
+                        onClick={() => {
+                          setPreviewQuality(q.value as any);
+                          setQualityMenuOpen(false);
+                        }}
+                      >
+                        <span className="flex w-4 shrink-0 justify-center pt-0.5">
+                          {previewQuality === q.value ? <Check className="h-3.5 w-3.5 text-accent" /> : null}
+                        </span>
+                        <div className="flex flex-col min-w-0 flex-1 leading-none">
+                          <span className="text-xs font-semibold text-text-primary">{q.label}</span>
+                          <span className="text-[10px] text-text-muted mt-1 leading-normal whitespace-normal">{q.description}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         }
         rightActions={

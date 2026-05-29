@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 export type Theme = "dark" | "midnight" | "ocean" | "forest" | "custom";
 export type FontFamily = "inter" | "montserrat" | "geist" | "outfit" | "roboto" | "space-grotesk" | "system" | "mono";
 export type FrameRate = 24 | 30 | 60;
+export type PreviewQuality = "full" | "high" | "medium" | "low";
 
 interface SettingsStore {
   // Appearance
@@ -19,10 +20,12 @@ interface SettingsStore {
   autoRipple: boolean;
   autoSave: boolean;
   defaultFrameRate: FrameRate;
+  previewQuality: PreviewQuality;
   setSnapToGrid: (v: boolean) => void;
   setAutoRipple: (v: boolean) => void;
   setAutoSave: (v: boolean) => void;
   setDefaultFrameRate: (v: FrameRate) => void;
+  setPreviewQuality: (v: PreviewQuality) => void;
 }
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -35,6 +38,7 @@ export const useSettingsStore = create<SettingsStore>()(
       autoRipple: false,
       autoSave: true,
       defaultFrameRate: 30,
+      previewQuality: "high",
 
       setTheme: (theme) => {
         set({ theme });
@@ -60,6 +64,7 @@ export const useSettingsStore = create<SettingsStore>()(
       setAutoRipple: (autoRipple) => set({ autoRipple }),
       setAutoSave: (autoSave) => set({ autoSave }),
       setDefaultFrameRate: (defaultFrameRate) => set({ defaultFrameRate }),
+      setPreviewQuality: (previewQuality) => set({ previewQuality }),
     }),
     {
       name: "clypra-settings",
