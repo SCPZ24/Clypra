@@ -495,7 +495,7 @@ export const StealthContourDefinition = {
   id: "stealth-contour",
   name: "Stealth Contour",
   text: "OUTLINE",
-  category: "classic",
+  category: "clean",
   description: "A custom Canvas 2D text effect named Stealth Contour with solid fill.",
   tags: ["studio-export", "custom-canvas", "solid"],
   font: {

@@ -517,7 +517,7 @@ export const CarbonShiftDefinition = {
   id: "carbon-shift",
   name: "Carbon Shift",
   text: "SHADOW",
-  category: "classic",
+  category: "grunge",
   description: "A custom Canvas 2D text effect named Carbon Shift with solid fill.",
   tags: ["studio-export", "custom-canvas", "solid"],
   font: {

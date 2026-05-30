@@ -471,7 +471,7 @@ export class LiquidObsidianPlasmaChromeEngine {
 export const LiquidObsidianPlasmaChromeDefinition = {
   id: "liquid-obsidian-plasma-chrome",
   name: "Liquid Obsidian Plasma Chrome",
-  category: "classic",
+  category: "metallic",
   description: "A custom Canvas 2D text effect named Liquid Obsidian Plasma Chrome with linear fill.",
   tags: ["studio-export", "custom-canvas", "linear"],
   font: {

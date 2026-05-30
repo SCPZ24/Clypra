@@ -946,9 +946,9 @@ export class CrimsonKineticHalftoneGlowEngine {
 
 export const CrimsonKineticHalftoneGlowDefinition = {
   id: "crimson-kinetic-halftone-glow",
-  name: "Crimson Kinetic Halftone Glow Halftone Glow",
+  name: "Crimson Halftone",
   text: "CLYPRA",
-  category: "classic",
+  category: "neon",
   description: "A custom Canvas 2D text effect named Crimson Kinetic Halftone Glow with pattern fill.",
   tags: ["studio-export", "custom-canvas", "pattern"],
   font: {

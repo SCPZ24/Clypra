@@ -960,7 +960,7 @@ export const SolarisShiftClassicSolidBevelDefinition = {
   id: "solaris-shift",
   name: "Solaris Shift",
   text: "TEXT",
-  category: "classic",
+  category: "3d",
   description: "A custom Canvas 2D text effect named Solaris Shift with solid fill.",
   tags: ["studio-export", "custom-canvas", "solid"],
   font: {

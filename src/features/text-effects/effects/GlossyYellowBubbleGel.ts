@@ -452,7 +452,7 @@ export class GlossyYellowBubbleGelEngine {
 export const GlossyYellowBubbleGelDefinition = {
   id: "glossy-yellow-bubble-gel",
   name: "Glossy Yellow Bubble Gel",
-  category: "classic",
+  category: "organic",
   description: "A custom Canvas 2D text effect named Glossy Yellow Bubble Gel with linear fill.",
   tags: ["studio-export", "custom-canvas", "linear"],
   font: {

@@ -467,7 +467,7 @@ export const BitDecayDefinition: TextEffectDefinition = {
   id: "bit-decay",
   name: "Bit Decay",
   text: "CLYPRA",
-  category: "classic",
+  category: "grunge",
   description: "A custom Canvas 2D text effect named Bit Decay with solid fill.",
   tags: ["studio-export", "custom-canvas", "solid"],
   font: {

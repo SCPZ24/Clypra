@@ -948,7 +948,7 @@ export const InfraContourAestheticDefinition = {
   id: "infra-contour",
   name: "Infra Contour",
   text: "CLYPRA",
-  category: "classic",
+  category: "clean",
   description: "A custom Canvas 2D text effect named Infra Contour with none fill.",
   tags: ["studio-export", "custom-canvas", "none"],
   font: {

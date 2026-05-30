@@ -946,9 +946,9 @@ export class InfraredDriftNoiseGlowEngine {
 
 export const InfraredDriftNoiseGlowDefinition = {
   id: "infrared-drift-noise-glow",
-  name: "Infrared Drift Noise Glow Noise Glow",
+  name: "Infrared Drift",
   text: "CLYPRA",
-  category: "classic",
+  category: "neon",
   description: "A custom Canvas 2D text effect named Infrared Drift Noise Glow with pattern fill.",
   tags: ["studio-export", "custom-canvas", "pattern"],
   font: {

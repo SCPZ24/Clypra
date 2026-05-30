@@ -468,7 +468,7 @@ export class VibrantComicExplosionEngine {
 export const VibrantComicExplosionDefinition = {
   id: "vibrant-comic-explosion",
   name: "Vibrant Comic Explosion",
-  category: "classic",
+  category: "retro",
   description: "A custom Canvas 2D text effect named Vibrant Comic Explosion with linear fill.",
   tags: ["studio-export", "custom-canvas", "linear"],
   font: {

@@ -345,7 +345,7 @@ export const BiolumeTrenchDefinition: TextEffectDefinition = {
   id: "biolume-trench",
   name: "Biolume Trench",
   text: "CLYPRA",
-  category: "classic",
+  category: "gradient",
   description: "A custom Canvas 2D text effect named Biolume Trench with linear fill.",
   tags: ["studio-export", "custom-canvas", "linear"],
   font: {

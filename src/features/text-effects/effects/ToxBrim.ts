@@ -520,7 +520,7 @@ export class ToxBrimEngine {
 export const ToxBrimDefinition = {
   id: "tox-brim",
   name: "ToxBrim",
-  category: "classic",
+  category: "organic",
   description: "A custom Canvas 2D text effect named ToxBrim with solid fill.",
   tags: ["studio-export", "custom-canvas", "solid"],
   font: {

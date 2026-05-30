@@ -108,7 +108,7 @@ const generateContextualCaptions = (nameStr: string, pathStr: string, isAudio: b
 
 // Categories list - mapped to EffectCategory type
 const effectCategories = ["Classic", "Metallic", "Neon", "Gradient", "3D", "Retro", "Grunge", "Clean", "Glitch", "Organic", "Space"];
-const templateCategories = ["All", "Title Card", "Lower Third", "Social", "Cinematic", "Broadcast", "Minimal", "Kinetic", "Energetic"];
+const templateCategories = ["All", "Title Card", "Lower Third", "Social", "Cinematic", "Broadcast", "Minimal", "Kinetic", "Energetic", "Documentary", "Outro"];
 
 export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
   const [activeTab, setActiveTab] = useState<"effects" | "templates" | "yours" | "captions">("effects");

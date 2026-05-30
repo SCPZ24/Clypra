@@ -455,7 +455,7 @@ export class EditorialVellumEngine {
 export const EditorialVellumDefinition = {
   id: "editorial-vellum",
   name: "Editorial Vellum",
-  category: "classic",
+  category: "gradient",
   description: "A custom Canvas 2D text effect named Editorial Vellum with linear fill.",
   tags: ["studio-export", "custom-canvas", "linear"],
   font: {

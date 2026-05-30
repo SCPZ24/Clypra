@@ -936,9 +936,9 @@ export class StarkContourEmptyStrokeEngine {
 
 export const StarkContourEmptyStrokeDefinition = {
   id: "stark-contour-empty-stroke",
-  name: "Stark Contour Empty Stroke Empty Stroke",
+  name: "Stark Contour",
   text: "CLYPRA",
-  category: "classic",
+  category: "clean",
   description: "A custom Canvas 2D text effect named Stark Contour Empty Stroke with none fill.",
   tags: ["studio-export", "custom-canvas", "none"],
   font: {

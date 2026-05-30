@@ -477,7 +477,7 @@ export class RetroComicEngine {
 export const RetroComicDefinition = {
   id: "retro-comic",
   name: "RetroComic",
-  category: "classic",
+  category: "retro",
   description: "A custom Canvas 2D text effect named RetroComic with solid fill.",
   tags: ["studio-export", "custom-canvas", "solid"],
   font: {

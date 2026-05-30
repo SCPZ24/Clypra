@@ -464,7 +464,7 @@ export const NeonCrimsonDefinition: TextEffectDefinition = {
   id: "neon-crimson",
   name: "NeonCrimson",
   text: "CLYPRA",
-  category: "classic",
+  category: "neon",
   description: "A custom Canvas 2D text effect named NeonCrimson with none fill.",
   tags: ["studio-export", "custom-canvas", "none"],
   font: {

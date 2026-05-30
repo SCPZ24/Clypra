@@ -24,25 +24,12 @@ export const TemplateCard: React.FC<TemplateCardProps> = ({
   const progressBarRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
 
-  // When hover state changes, play or pause the animation
+  // Always autoplay and loop without hover requirements
   useEffect(() => {
-    if (!lottieRef.current) return;
-    if (isHovered) {
+    if (lottieRef.current) {
       lottieRef.current.play();
-    } else {
-      lottieRef.current.pause();
-      // Jump back to thumbnail frame when not hovering
-      lottieRef.current.goToFrame(template.thumbnailFrame || 0);
-
-      // Reset progress bar to thumbnail frame percentage or 0%
-      if (progressBarRef.current) {
-        const total = template.durationFrames || 120;
-        const current = template.thumbnailFrame || 0;
-        const percentage = total > 0 ? (current / total) * 100 : 0;
-        progressBarRef.current.style.width = `${percentage}%`;
-      }
     }
-  }, [isHovered, template.thumbnailFrame, template.durationFrames]);
+  }, []);
 
   // Handle high-performance off-React timeline progress bar update (60fps)
   const handleFrameChange = (currentFrame: number, totalFrames: number) => {
@@ -82,7 +69,7 @@ export const TemplateCard: React.FC<TemplateCardProps> = ({
         <LottiePlayer
           ref={lottieRef}
           lottieData={template.lottieData}
-          autoplay={false}
+          autoplay={true}
           loop={true}
           initialFrame={template.thumbnailFrame || 0}
           onFrameChange={handleFrameChange}

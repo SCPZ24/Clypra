@@ -959,7 +959,7 @@ export class AmberPunchVividGradientBevelEngine {
 export const AmberPunchVividGradientBevelDefinition = {
   id: "amber-punch",
   name: "Amber Punch",
-  category: "classic",
+  category: "gradient",
   description: "A custom Canvas 2D text effect named Amber Punch with linear fill.",
   tags: ["studio-export", "custom-canvas", "linear"],
   font: {

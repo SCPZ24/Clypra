@@ -442,7 +442,7 @@ export const MintGlacéDefinition = {
   id: "mint-glacé",
   name: "Mint Glacé",
   text: "CLYPRA",
-  category: "classic",
+  category: "gradient",
   description: "A custom Canvas 2D text effect named Mint Glacé with linear fill.",
   tags: ["studio-export", "custom-canvas", "linear"],
   font: {

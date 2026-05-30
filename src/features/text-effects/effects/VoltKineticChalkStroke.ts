@@ -936,9 +936,9 @@ export class VoltKineticChalkStrokeEngine {
 
 export const VoltKineticChalkStrokeDefinition = {
   id: "volt-kinetic-chalk-stroke",
-  name: "Volt Kinetic Chalk Stroke Chalk Stroke",
+  name: "Volt Chalk",
   text: "CLYPRA",
-  category: "classic",
+  category: "grunge",
   description: "A custom Canvas 2D text effect named Volt Kinetic Chalk Stroke with pattern fill.",
   tags: ["studio-export", "custom-canvas", "pattern"],
   font: {

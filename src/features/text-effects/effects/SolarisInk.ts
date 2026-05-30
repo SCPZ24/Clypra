@@ -356,7 +356,7 @@ export const SolarisInkDefinition: TextEffectDefinition = {
   id: "solaris-ink",
   name: "Solaris Ink",
   text: "CLYPRA",
-  category: "classic",
+  category: "metallic",
   description: "A custom Canvas 2D text effect named Solaris Ink with solid fill.",
   tags: ["studio-export", "custom-canvas", "solid"],
   font: {

@@ -452,7 +452,7 @@ export class NeonCyberStickerEngine {
 export const NeonCyberStickerDefinition = {
   id: "neon-cyber-sticker",
   name: "Neon Cyber Sticker",
-  category: "classic",
+  category: "neon",
   description: "A custom Canvas 2D text effect named Neon Cyber Sticker with linear fill.",
   tags: ["studio-export", "custom-canvas", "linear"],
   font: {

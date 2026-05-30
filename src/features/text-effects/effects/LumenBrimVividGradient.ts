@@ -960,7 +960,7 @@ export const LumenBrimVividGradientDefinition = {
   id: "lumen-brim",
   name: "LumenBrim",
   text: "CLYPRA",
-  category: "classic",
+  category: "gradient",
   description: "A custom Canvas 2D text effect named LumenBrim with linear fill.",
   tags: ["studio-export", "custom-canvas", "linear"],
   font: {

@@ -936,9 +936,9 @@ export class CrimsonNeueSolidShadowEngine {
 
 export const CrimsonNeueSolidShadowDefinition = {
   id: "crimson-neue-solid-shadow",
-  name: "Crimson Neue Solid Shadow Solid Shadow",
+  name: "Crimson Neue",
   text: "CLYPRA",
-  category: "classic",
+  category: "clean",
   description: "A custom Canvas 2D text effect named Crimson Neue Solid Shadow with solid fill.",
   tags: ["studio-export", "custom-canvas", "solid"],
   font: {
