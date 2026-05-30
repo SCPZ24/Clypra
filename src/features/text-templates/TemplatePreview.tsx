@@ -3,9 +3,10 @@ import { TemplateDefinition, TemplateCustomization } from "./types";
 import { LottiePlayer, LottiePlayerHandle } from "./LottiePlayer";
 import { injectText, injectColor } from "./TemplateInjector";
 import { Button } from "@/components/ui/Button";
-import { ArrowLeft, Plus, AlertCircle, RefreshCw } from "lucide-react";
-import { useTemplateStore } from "./templateStore";
+import { ArrowLeft, Plus, AlertCircle, Loader2 } from "lucide-react";
 import { useUIStore } from "@/store/uiStore";
+import { ClypraApi } from "@/features/text-effects/api/clypraApi";
+import { ALL_TEMPLATES } from "./templates/index";
 
 interface TemplatePreviewProps {
   template: TemplateDefinition;
@@ -24,14 +25,40 @@ export const TemplatePreview: React.FC<TemplatePreviewProps> = ({ template, onBa
     primaryColor: "#FFFFFF"
   });
 
+  const [lottieData, setLottieData] = useState<any>(template.lottieData);
+  const [isLoadingLottie, setIsLoadingLottie] = useState(!template.lottieData);
   const [injectedData, setInjectedData] = useState<any>(template.lottieData);
   const [isUpdating, setIsUpdating] = useState(false);
 
+  // Dynamic on-demand Lottie JSON fetching if missing
+  useEffect(() => {
+    if (!template.lottieData) {
+      setIsLoadingLottie(true);
+      ClypraApi.getLottieTemplate(template.category, template.id)
+        .then((data) => {
+          setLottieData(data);
+          setIsLoadingLottie(false);
+        })
+        .catch((err) => {
+          console.warn("[Clypra:TemplatePreview] Failed to fetch Lottie JSON from local API, utilizing offline fallback:", err);
+          const fallback = ALL_TEMPLATES.find((t) => t.id === template.id);
+          if (fallback && fallback.lottieData) {
+            setLottieData(fallback.lottieData);
+          }
+          setIsLoadingLottie(false);
+        });
+    } else {
+      setLottieData(template.lottieData);
+      setIsLoadingLottie(false);
+    }
+  }, [template]);
+
   // Debounced injection
   useEffect(() => {
+    if (!lottieData) return;
     setIsUpdating(true);
     const timer = setTimeout(() => {
-      let newData = injectText(template.lottieData, customization, template.textLayers);
+      let newData = injectText(lottieData, customization, template.textLayers);
       if (customization.primaryColor) {
         newData = injectColor(newData, "primary-fill-layer", customization.primaryColor); // Generic fill layer name convention
       }
@@ -49,7 +76,7 @@ export const TemplatePreview: React.FC<TemplatePreviewProps> = ({ template, onBa
       lottieRef.current?.play();
     }, 400); // 400ms debounce
     return () => clearTimeout(timer);
-  }, [customization, template.lottieData, template.textLayers]);
+  }, [customization, lottieData, template.textLayers, template]);
 
   const handleTextChange = (role: 'primary' | 'secondary' | 'accent', value: string) => {
     setCustomization(prev => ({
@@ -104,29 +131,38 @@ export const TemplatePreview: React.FC<TemplatePreviewProps> = ({ template, onBa
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {/* Input Editor Fields */}
-        <div className="space-y-4">
-          <h4 className="text-xs font-semibold text-text-primary border-b border-border/30 pb-2">Customization</h4>
-          
-          <div className="space-y-4">
-            {renderInputForRole('primary')}
-            {renderInputForRole('secondary')}
-            {renderInputForRole('accent')}
+        {isLoadingLottie ? (
+          <div className="h-48 flex flex-col items-center justify-center gap-3 bg-surface-raised/40 border border-border/30 rounded-xl p-4">
+            <Loader2 className="w-6 h-6 text-accent animate-spin" />
+            <span className="text-xs text-text-muted font-medium">Fetching animation from API...</span>
           </div>
-        </div>
+        ) : (
+          <>
+            {/* Input Editor Fields */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-semibold text-text-primary border-b border-border/30 pb-2">Customization</h4>
+              
+              <div className="space-y-4">
+                {renderInputForRole('primary')}
+                {renderInputForRole('secondary')}
+                {renderInputForRole('accent')}
+              </div>
+            </div>
 
-        <div className="pt-4 border-t border-border/30">
-          <Button 
-            onClick={() => onAddToTimeline(template, customization)}
-            className="w-full py-2.5 bg-accent hover:bg-accent/80 text-white font-semibold flex items-center justify-center gap-2 shadow-[0_4px_12px_rgba(108,99,255,0.2)] rounded-lg"
-          >
-            <Plus className="w-4 h-4" />
-            Add to Timeline
-          </Button>
-          <p className="text-[9px] text-center text-text-muted mt-3">
-            Duration: {(template.durationFrames / template.fps).toFixed(1)}s ({template.durationFrames} frames)
-          </p>
-        </div>
+            <div className="pt-4 border-t border-border/30">
+              <Button 
+                onClick={() => onAddToTimeline(template, customization)}
+                className="w-full py-2.5 bg-accent hover:bg-accent/80 text-white font-semibold flex items-center justify-center gap-2 shadow-[0_4px_12px_rgba(108,99,255,0.2)] rounded-lg"
+              >
+                <Plus className="w-4 h-4" />
+                Add to Timeline
+              </Button>
+              <p className="text-[9px] text-center text-text-muted mt-3">
+                Duration: {(template.durationFrames / template.fps).toFixed(1)}s ({template.durationFrames} frames)
+              </p>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

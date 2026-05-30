@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Search, Sparkles, MessageSquare, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Search, Sparkles, MessageSquare, Loader2, CheckCircle2, AlertCircle, Cloud, CloudOff } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { invoke } from "@tauri-apps/api/core";
-import { ALL_TEMPLATES } from "@/features/text-templates/templates/index";
 import { TemplateDefinition, TemplateCustomization } from "@/features/text-templates/types";
 import type { TabProps } from "./types";
 import { EffectCard } from "@/components/ui/EffectCard";
@@ -15,6 +14,8 @@ import { allTextEffects } from "@/features/text-effects/registry";
 import { useTimelineStore, getInsertIndexForNewTrack } from "@/store/timelineStore";
 import { useProjectStore } from "@/store/projectStore";
 import { createTextClip } from "@/lib/textClip";
+import { ClypraApi } from "@/features/text-effects/api/clypraApi";
+import { useTemplateStore } from "@/features/text-templates/templateStore";
 
 /**
  * Generates highly realistic, context-aware subtitle lines based on the active clip filename and path.
@@ -129,6 +130,32 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
 
   const mediaAssets = useProjectStore((s) => s.mediaAssets);
   const clips = useTimelineStore((s) => s.clips);
+
+  // Dynamic API states for Text Effects and Templates
+  const { templates, loadTemplates, selectTemplate, isApiConnected: isTemplatesApiConnected, isLoading: isTemplatesLoading } = useTemplateStore();
+  const [effects, setEffects] = useState<any[]>(allTextEffects);
+  const [isEffectsLoading, setIsEffectsLoading] = useState(false);
+  const [isEffectsApiConnected, setIsEffectsApiConnected] = useState(false);
+
+  // Fetch from the API on mount
+  useEffect(() => {
+    loadTemplates();
+
+    setIsEffectsLoading(true);
+    ClypraApi.getEffectsIndex()
+      .then((apiEffects) => {
+        setEffects(apiEffects);
+        setIsEffectsApiConnected(true);
+      })
+      .catch((err) => {
+        console.warn("[Clypra:TextTab] Failed to fetch effects from Cloud API, using pre-bundled effects:", err);
+        setEffects(allTextEffects);
+        setIsEffectsApiConnected(false);
+      })
+      .finally(() => {
+        setIsEffectsLoading(false);
+      });
+  }, []);
 
   const hasAudioOrVideoClips = clips.some((clip) => {
     const asset = mediaAssets.find((a) => a.id === clip.mediaId);
@@ -301,9 +328,13 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
     }
   };
 
-  const handlePreview = (item: any, type: "effect" | "template") => {
+  const handlePreview = async (item: any, type: "effect" | "template") => {
     if (type === "template") {
-      // Immediately push template definition to main previewer with original data
+      // First select the template to ensure its Lottie JSON data is fetched
+      await selectTemplate(item);
+      setPreviewTemplate(item);
+
+      // Push initial template definition to main previewer with original data
       useUIStore.getState().previewTextPreset(
         {
           ...item,
@@ -319,7 +350,14 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
       return;
     }
 
-    useUIStore.getState().previewTextPreset(item, type);
+    // Lazy-load detailed text effect configurations on-demand for previewing
+    try {
+      const fullEffect = await ClypraApi.getFullEffect(item.category, item.id);
+      useUIStore.getState().previewTextPreset(fullEffect, type);
+    } catch (err) {
+      console.error("[Clypra:TextTab] Failed to load effect details for preview:", err);
+      useUIStore.getState().previewTextPreset(item, type);
+    }
 
     // Set active transport context to source immediately
     const session = getActiveSessionOrNull();
@@ -359,7 +397,7 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
     localStorage.setItem("clypra_text_favorites", JSON.stringify(next));
   };
 
-  const handleDownloadAndApply = (item: any, type: "effect" | "template", e: React.MouseEvent) => {
+  const handleDownloadAndApply = async (item: any, type: "effect" | "template", e: React.MouseEvent) => {
     e.stopPropagation();
     const itemId = item.id;
     if (downloadingIds.has(itemId)) return;
@@ -370,6 +408,16 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
       return next;
     });
 
+    // Lazy load the full vector parameters concurrently with the spinner
+    let fullEffect: any = null;
+    if (type === "effect") {
+      try {
+        fullEffect = await ClypraApi.getFullEffect(item.category, item.id);
+      } catch (err) {
+        console.error("[Clypra:TextTab] Failed to lazy load detailed config on click:", err);
+      }
+    }
+
     setTimeout(() => {
       setDownloadingIds((prev) => {
         const next = new Set(prev);
@@ -379,18 +427,19 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
 
       // Apply to timeline
       if (type === "effect") {
+        const targetEffect = fullEffect || item;
         onAddToTimeline?.(
           {
-            name: item.name,
-            text: item.text, // Use the effect's default text instead of the effect name
+            name: targetEffect.name,
+            text: targetEffect.text || "CLYPRA", // Use default text from full definition
             presetType: "effect",
-            styleId: item.id,
-            fontFamily: item.font?.family,
-            color: item.fills?.[0]?.color,
-            fontWeight: item.font?.weight,
-            fontStyle: item.font?.style,
-            stroke: item.strokes?.[0] ? { color: item.strokes[0].color, width: item.strokes[0].width } : undefined,
-            shadow: item.shadows?.[0] ? { color: item.shadows[0].color, blur: item.shadows[0].blur, offsetX: item.shadows[0].offsetX ?? 0, offsetY: item.shadows[0].offsetY ?? 0 } : undefined,
+            styleId: targetEffect.id,
+            fontFamily: targetEffect.font?.family,
+            color: targetEffect.fills?.[0]?.color,
+            fontWeight: targetEffect.font?.weight,
+            fontStyle: targetEffect.font?.style,
+            stroke: targetEffect.strokes?.[0] ? { color: targetEffect.strokes[0].color, width: targetEffect.strokes[0].width } : undefined,
+            shadow: targetEffect.shadows?.[0] ? { color: targetEffect.shadows[0].color, blur: targetEffect.shadows[0].blur, offsetX: targetEffect.shadows[0].offsetX ?? 0, offsetY: targetEffect.shadows[0].offsetY ?? 0 } : undefined,
           },
           "text",
         );
@@ -442,13 +491,17 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
     );
   }
 
-  // Filter items - compare lowercase category names
-  const filteredEffects = allTextEffects.filter((effect) => effect.category.toLowerCase() === activeCategory.toLowerCase() && effect.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  // Filter items - compare lowercase category names using dynamic API effects list
+  const filteredEffects = effects.filter((effect) => effect.category.toLowerCase() === activeCategory.toLowerCase() && effect.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  const filteredTemplates = ALL_TEMPLATES.filter((template) => (activeCategory === "All" || template.category.toLowerCase().replace("-", " ") === activeCategory.toLowerCase()) && template.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredTemplates = templates.filter((template) => (activeCategory === "All" || template.category.toLowerCase().replace("-", " ") === activeCategory.toLowerCase()) && template.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  const favoriteEffectsList = allTextEffects.filter((e) => favorites.includes(e.id));
-  const favoriteTemplatesList = ALL_TEMPLATES.filter((t) => favorites.includes(t.id));
+  const favoriteEffectsList = effects.filter((e) => favorites.includes(e.id));
+  const favoriteTemplatesList = templates.filter((t) => favorites.includes(t.id));
+
+  // Global connection status
+  const isCloudConnected = isEffectsApiConnected || isTemplatesApiConnected;
+  const isLibraryLoading = isEffectsLoading || isTemplatesLoading;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-surface/5 select-none">
@@ -498,7 +551,32 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
             <input type="text" placeholder={`Search ${activeTab === "effects" ? "effects" : activeTab === "templates" ? "templates" : "text presets"}...`} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-surface-raised rounded-sm pl-8 pr-3 py-1.5 text-xs text-text-primary outline-none transition-colors" />
           </div>
-          <div className="flex items-center gap-1 shrink-0 text-[10px] font-mono text-text-muted font-semibold bg-surface-raised border border-border/50 px-2 py-1.5 rounded-md">
+          
+          {/* Dynamic API Connection Status Badge */}
+          <div className="flex items-center gap-1.5 shrink-0 text-[10px] font-mono text-text-muted font-bold bg-surface-raised border border-border/50 px-2 py-1 rounded-md">
+            {isCloudConnected ? (
+              <>
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                </span>
+                <span className="text-emerald-400 font-medium flex items-center gap-1">
+                  <Cloud className="w-3 h-3 text-emerald-400" />
+                  Cloud Sync
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+                <span className="text-amber-500 font-medium flex items-center gap-1">
+                  <CloudOff className="w-3 h-3 text-amber-500" />
+                  Offline
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0 text-[10px] font-mono text-text-muted font-semibold bg-surface-raised border border-border/50 px-2 py-1 rounded-md">
             <span className="text-accent-soft">{activeCategory}</span>
           </div>
         </div>
@@ -506,69 +584,78 @@ export const TextTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
 
       {/* ── Main content Scrollable Grid area ───────────────────────── */}
       <div className="grow overflow-y-auto scrollbar-thin p-1">
-        {/* Yours/Favorites Display */}
-        {activeTab === "yours" && (
-          <div className="space-y-6">
-            <div>
-              <h4 className="text-xs font-semibold text-text-muted mb-2.5 uppercase tracking-wide">Favorite Effects ({favoriteEffectsList.length})</h4>
-              {favoriteEffectsList.length === 0 ? (
-                <p className="text-xs text-text-muted/60 italic py-2 pl-1">No favorite effects saved.</p>
-              ) : (
-                <div className="grid grid-cols-3 gap-1">
-                  {favoriteEffectsList.map((effect) => (
-                    <EffectCard key={effect.id} effect={effect} isFavorite={true} isDownloading={downloadingIds.has(effect.id)} onFavorite={(e) => toggleFavorite(effect.id, e)} onApply={(e) => handleDownloadAndApply(effect, "effect", e)} onPreview={() => handlePreview(effect, "effect")} />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <h4 className="text-xs font-semibold text-text-muted mb-2.5 uppercase tracking-wide">Favorite Templates ({favoriteTemplatesList.length})</h4>
-              {favoriteTemplatesList.length === 0 ? (
-                <p className="text-xs text-text-muted/60 italic py-2 pl-1">No favorite templates saved.</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  {favoriteTemplatesList.map((template) => (
-                    <TemplateCard key={template.id} template={template} isFavorite={true} isDownloading={downloadingIds.has(template.id)} onFavorite={(e) => toggleFavorite(template.id, e)} onApply={(e) => handleDownloadAndApply(template, "template", e)} onPreview={() => handlePreview(template, "template")} />
-                  ))}
-                </div>
-              )}
-            </div>
+        {isLibraryLoading ? (
+          <div className="h-40 flex flex-col items-center justify-center gap-2 text-text-muted text-xs">
+            <Loader2 className="w-6 h-6 text-accent animate-spin" />
+            <p className="font-semibold text-text-muted/80">Updating effects & templates library...</p>
           </div>
-        )}
-
-        {/* Effects Display Grid */}
-        {activeTab === "effects" && (
+        ) : (
           <>
-            {filteredEffects.length === 0 ? (
-              <div className="h-40 flex flex-col items-center justify-center text-text-muted gap-1 text-xs">
-                <p>No matching effects found</p>
-                <p className="opacity-60">Try searching for other styles</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-1">
-                {filteredEffects.map((effect) => (
-                  <EffectCard key={effect.id} effect={effect} isFavorite={favorites.includes(effect.id)} isDownloading={downloadingIds.has(effect.id)} onFavorite={(e) => toggleFavorite(effect.id, e)} onApply={(e) => handleDownloadAndApply(effect, "effect", e)} onPreview={() => handlePreview(effect, "effect")} />
-                ))}
+            {/* Yours/Favorites Display */}
+            {activeTab === "yours" && (
+              <div className="space-y-6">
+                <div>
+                  <h4 className="text-xs font-semibold text-text-muted mb-2.5 uppercase tracking-wide">Favorite Effects ({favoriteEffectsList.length})</h4>
+                  {favoriteEffectsList.length === 0 ? (
+                    <p className="text-xs text-text-muted/60 italic py-2 pl-1">No favorite effects saved.</p>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-1">
+                      {favoriteEffectsList.map((effect) => (
+                        <EffectCard key={effect.id} effect={effect} isFavorite={true} isDownloading={downloadingIds.has(effect.id)} onFavorite={(e) => toggleFavorite(effect.id, e)} onApply={(e) => handleDownloadAndApply(effect, "effect", e)} onPreview={() => handlePreview(effect, "effect")} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h4 className="text-xs font-semibold text-text-muted mb-2.5 uppercase tracking-wide">Favorite Templates ({favoriteTemplatesList.length})</h4>
+                  {favoriteTemplatesList.length === 0 ? (
+                    <p className="text-xs text-text-muted/60 italic py-2 pl-1">No favorite templates saved.</p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3">
+                      {favoriteTemplatesList.map((template) => (
+                        <TemplateCard key={template.id} template={template} isFavorite={true} isDownloading={downloadingIds.has(template.id)} onFavorite={(e) => toggleFavorite(template.id, e)} onApply={(e) => handleDownloadAndApply(template, "template", e)} onPreview={() => handlePreview(template, "template")} />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
-          </>
-        )}
 
-        {/* Templates Display Grid */}
-        {activeTab === "templates" && (
-          <>
-            {filteredTemplates.length === 0 ? (
-              <div className="h-40 flex flex-col items-center justify-center text-text-muted gap-1 text-xs">
-                <p>No matching templates found</p>
-                <p className="opacity-60">Try searching other categories</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-1">
-                {filteredTemplates.map((template) => (
-                  <TemplateCard key={template.id} template={template} isFavorite={favorites.includes(template.id)} isDownloading={downloadingIds.has(template.id)} onFavorite={(e) => toggleFavorite(template.id, e)} onApply={(e) => handleDownloadAndApply(template, "template", e)} onPreview={() => handlePreview(template, "template")} />
-                ))}
-              </div>
+            {/* Effects Display Grid */}
+            {activeTab === "effects" && (
+              <>
+                {filteredEffects.length === 0 ? (
+                  <div className="h-40 flex flex-col items-center justify-center text-text-muted gap-1 text-xs">
+                    <p>No matching effects found</p>
+                    <p className="opacity-60">Try searching for other styles</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-1">
+                    {filteredEffects.map((effect) => (
+                      <EffectCard key={effect.id} effect={effect} isFavorite={favorites.includes(effect.id)} isDownloading={downloadingIds.has(effect.id)} onFavorite={(e) => toggleFavorite(effect.id, e)} onApply={(e) => handleDownloadAndApply(effect, "effect", e)} onPreview={() => handlePreview(effect, "effect")} />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Templates Display Grid */}
+            {activeTab === "templates" && (
+              <>
+                {filteredTemplates.length === 0 ? (
+                  <div className="h-40 flex flex-col items-center justify-center text-text-muted gap-1 text-xs">
+                    <p>No matching templates found</p>
+                    <p className="opacity-60">Try searching other categories</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-1">
+                    {filteredTemplates.map((template) => (
+                      <TemplateCard key={template.id} template={template} isFavorite={favorites.includes(template.id)} isDownloading={downloadingIds.has(template.id)} onFavorite={(e) => toggleFavorite(template.id, e)} onApply={(e) => handleDownloadAndApply(template, "template", e)} onPreview={() => handlePreview(template, "template")} />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
