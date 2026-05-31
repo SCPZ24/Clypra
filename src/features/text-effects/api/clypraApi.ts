@@ -12,6 +12,22 @@ export interface TextEffectSummary {
 }
 
 const BASE = "https://clypra-worker-api.abdulkabirmusa.com";
+const API_KEY = import.meta.env.VITE_CLYPRA_API_KEY || "";
+
+// Helper function to create headers with API key
+const getHeaders = (): HeadersInit => {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+    "X-Clypra-Client": "clypra-desktop-v1",
+    "User-Agent": "Clypra-Desktop/1.0.0",
+  };
+
+  if (API_KEY) {
+    headers["X-API-Key"] = API_KEY;
+  }
+
+  return headers;
+};
 
 export const ClypraApi = {
   // In-memory cache map to avoid duplicate network calls when users toggle effects
@@ -21,7 +37,9 @@ export const ClypraApi = {
   // 0. Checks if the API is online by hitting the health endpoint
   async checkApiHealth(): Promise<boolean> {
     try {
-      const res = await fetch(`${BASE}/health`);
+      const res = await fetch(`${BASE}/health`, {
+        headers: getHeaders(),
+      });
       if (!res.ok) return false;
       const data = await res.json();
       return data.status === "ok";
@@ -30,21 +48,24 @@ export const ClypraApi = {
     }
   },
 
-  // 1. Fetch thin summaries for picker UI layout (Call once on startup, size is ~50KB)
+  // 1. Fetch summaries for category tab picker UI
   async getEffectsIndex(): Promise<TextEffectSummary[]> {
-    const res = await fetch(`${BASE}/effects`);
-    if (!res.ok) throw new Error("Failed to load text effects directory");
+    const res = await fetch(`${BASE}/effects`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error("Failed to load effects index");
     return res.json();
   },
 
-  // 2. Fetch thin summaries for category tab picker UI
   async getEffectsByCategory(category: string): Promise<TextEffectSummary[]> {
-    const res = await fetch(`${BASE}/effects/${category}`);
+    const res = await fetch(`${BASE}/effects/${category}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(`Failed to load category manifest for: ${category}`);
     return res.json();
   },
 
-  // 3. LAZY-LOAD heavy configurations on selection with RAM caching
+  // 2. LAZY-LOAD heavy configurations on selection with RAM caching
   async getFullEffect(category: string, id: string): Promise<TextEffectDefinition> {
     const cacheKey = `${category}:${id}`;
     if (this._effectsCache.has(cacheKey)) {
@@ -52,7 +73,9 @@ export const ClypraApi = {
     }
 
     console.log(`[API] Fetching heavy configuration on-demand for effect: ${id}`);
-    const res = await fetch(`${BASE}/effects/${category}/${id}`);
+    const res = await fetch(`${BASE}/effects/${category}/${id}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(`Failed to load heavy configuration for effect: ${id}`);
 
     const data: TextEffectDefinition = await res.json();
@@ -60,10 +83,20 @@ export const ClypraApi = {
     return data;
   },
 
-  // 4. Fetch thin summaries for template manifest
+  // 3. Fetch summaries for template category tab picker UI
   async getTemplatesIndex(): Promise<TemplateDefinition[]> {
-    const res = await fetch(`${BASE}/templates`);
-    if (!res.ok) throw new Error("Failed to load templates directory");
+    const res = await fetch(`${BASE}/templates`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error("Failed to load templates index");
+    return res.json();
+  },
+
+  async getTemplatesByCategory(category: string): Promise<TemplateDefinition[]> {
+    const res = await fetch(`${BASE}/templates/${category}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to load templates for category: ${category}`);
     return res.json();
   },
 
@@ -75,7 +108,9 @@ export const ClypraApi = {
     }
 
     console.log(`[API] Fetching heavy Lottie vector data on-demand for template: ${id}`);
-    const res = await fetch(`${BASE}/templates/${category}/${id}`);
+    const res = await fetch(`${BASE}/templates/${category}/${id}`, {
+      headers: getHeaders(),
+    });
     if (!res.ok) throw new Error(`Failed to load Lottie animation payload for: ${id}`);
 
     const data = await res.json();
@@ -83,4 +118,3 @@ export const ClypraApi = {
     return data;
   },
 };
-

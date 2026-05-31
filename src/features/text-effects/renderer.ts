@@ -141,7 +141,7 @@ export const renderTextEffectToContext = (
   }
 
   // Apply baseline font config only for the fallback generic renderer
-  applyFontConfig(ctx, effect.font, fontSize);
+  applyFontConfig(ctx, effect.font || { family: "Arial", weight: "bold", style: "normal", letterSpacing: 0, lineHeight: 1.2 }, fontSize);
 
   // ── Fallback generic renderer ────────────────────────────────────────────
   // Reached only for effects that are not registered in the registry.
