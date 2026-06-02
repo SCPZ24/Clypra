@@ -1,9 +1,68 @@
-import { evaluateScene, textEffectConfigToScene, defaultConfig as engineDefaultConfig, type TextEffectConfig } from "@clypra/engine";
-import { applyFontConfig, resolveFontFamilyName } from "./lib/helpers";
+import { evaluateScene, textEffectConfigToScene, defaultConfig as engineDefaultConfig, WebGLCompositor, type TextEffectConfig } from "@clypra/engine";
 import { TextEffectDefinition } from "./types/types";
 import { hasRegisteredEngine, renderRegisteredEffect, _buildConfig } from "./registry";
 
-// ─── Scene cache ──────────────────────────────────────────────────────────────
+// ─── ctx.filter support detection ────────────────────────────────────────────
+// Tauri WebView (WKWebView on macOS) does not support ctx.filter, which the
+// engine uses for stroke blur and glow effects. Detect once at module load and
+// use the WebGLCompositor workaround when unsupported.
+let _ctxFilterSupported: boolean | null = null;
+let _compositor: InstanceType<typeof WebGLCompositor> | null = null;
+
+function isCtxFilterSupported(): boolean {
+  if (_ctxFilterSupported !== null) return _ctxFilterSupported;
+  try {
+    const test = document.createElement("canvas").getContext("2d")!;
+    test.filter = "blur(4px)";
+    _ctxFilterSupported = test.filter !== "none" && test.filter !== "" && test.filter !== "blur(4px)";
+    // Some WebViews accept the assignment silently but don't actually apply it —
+    // check if the filter string round-trips correctly.
+    _ctxFilterSupported = test.filter.includes("blur");
+  } catch {
+    _ctxFilterSupported = false;
+  }
+  return _ctxFilterSupported;
+}
+
+function getCompositor(): InstanceType<typeof WebGLCompositor> | null {
+  if (_compositor !== null) return _compositor;
+  _compositor = new WebGLCompositor();
+  return _compositor.isSupported ? _compositor : null;
+}
+
+/**
+ * Draw an evaluated scene to the target canvas.
+ * Routes through WebGLCompositor when ctx.filter is unsupported (Tauri WebView).
+ */
+function drawScene(targetCtx: CanvasRenderingContext2D, cfg: TextEffectConfig, time: number): void {
+  const scene = getOrBuildScene(cfg);
+  const w = cfg.canvasWidth as number;
+  const h = cfg.canvasHeight as number;
+
+  if (!isCtxFilterSupported()) {
+    // ctx.filter unsupported — render to OffscreenCanvas first, then composite
+    // via WebGLCompositor which applies blur/glow as WebGL post-fx.
+    const compositor = getCompositor();
+    const off = new OffscreenCanvas(w, h);
+    const offCtx = off.getContext("2d") as OffscreenCanvasRenderingContext2D;
+    offCtx.clearRect(0, 0, w, h);
+    evaluateScene(scene, time, offCtx as unknown as CanvasRenderingContext2D);
+
+    if (compositor) {
+      compositor.renderToContext(targetCtx, off, { blur: 0, bloom: 0, bloomThreshold: 0.6 });
+    } else {
+      // WebGL also unsupported — draw flat (no blur/glow, best we can do)
+      targetCtx.clearRect(0, 0, w, h);
+      targetCtx.drawImage(off, 0, 0);
+    }
+    return;
+  }
+
+  // ctx.filter is supported — evaluate directly onto the target context
+  targetCtx.clearRect(0, 0, w, h);
+  evaluateScene(scene, time, targetCtx);
+}
+
 // textEffectConfigToScene is pure — cache by config identity to avoid rebuilding
 // on every animation frame.
 const _sceneCache = new WeakMap<object, ReturnType<typeof textEffectConfigToScene>>();
@@ -53,14 +112,10 @@ export const renderTextEffectToContext = (ctx: CanvasRenderingContext2D | Offscr
   }
 
   // ── @clypra/engine pipeline (all API-fetched effects) ─────────────────────
-  // Use evaluateScene — the correct full pipeline. This is the only path that
-  // correctly applies ctx.filter for stroke blur, multi-pass glow compositing,
-  // bevel depth, and all other post-fx the engine supports.
+  // Routes through drawScene which detects ctx.filter support and falls back
+  // to WebGLCompositor when running inside Tauri's WKWebView.
   const cfg = buildEngineConfig(effect, text, fontSize, canvasWidth, canvasHeight, time, clipStartTime, clipDuration);
-  const scene = getOrBuildScene(cfg);
-
-  ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-  evaluateScene(scene, time ?? 0, ctx as CanvasRenderingContext2D);
+  drawScene(ctx as CanvasRenderingContext2D, cfg, time ?? 0);
 };
 
 /**
@@ -124,10 +179,10 @@ export const renderTextEffectAsync = async (canvas: HTMLCanvasElement, text: str
     // Font load failed (offline / unknown family) — render with fallback
   }
 
-  // Step 4 — Draw
+  // Step 4 — Draw (routes through WebGLCompositor if ctx.filter unsupported)
   const draw = () => {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    renderTextEffectToContext(ctx, text, effect, fontSize, canvas.width / 2, canvas.height / 2, canvas.width, canvas.height, time);
+    const cfg = buildEngineConfig(effect, text, fontSize, canvas.width, canvas.height, time);
+    drawScene(ctx, cfg, time ?? 0);
   };
 
   draw();
