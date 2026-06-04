@@ -29,7 +29,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "mobile:sync": "npm run build && npx cap sync",
+    "mobile:live": "CAPACITOR_LIVE_RELOAD=true npx cap sync"
   },
   "dependencies": {
     "@capacitor/core": "^8.4.0",
