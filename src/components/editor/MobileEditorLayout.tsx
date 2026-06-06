@@ -17,10 +17,11 @@ import { autoAdaptSequenceForFirstVisualClip } from "@/lib/sequenceAutoAspect";
 import { DEFAULT_PLACEMENT_POLICY, resolveAddToTimelinePlacement, resolveDefaultFitModeForAsset } from "@/lib/placementPolicy";
 import { getPlaybackClock } from "@/hooks/usePlaybackClock";
 import type { TabType } from "./media-tabs";
+import type { MediaAsset } from "@/types";
 
 export const MobileEditorLayout: React.FC = () => {
   const { tracks, clips, addClip, addTrack, insertTrackAt, getTimelineEndTime } = useTimelineStore();
-  const { mediaAssets, project, updateProject } = useProjectStore();
+  const { mediaAssets, project, updateProject, addMediaAsset } = useProjectStore();
   const { selectedClipIds } = useUIStore();
   const { undo, redo, state: historyState } = useHistoryStore();
   const { importMedia, isLoading: isImporting } = useMediaImport();
@@ -126,6 +127,46 @@ export const MobileEditorLayout: React.FC = () => {
       });
 
       addClip(textClip);
+    } else if (type === "audio" && item?.audioUrl) {
+      const mediaAsset: MediaAsset = {
+        id: `audio-library-${item.id}`,
+        name: item.name || "Library Audio",
+        path: item.audioUrl,
+        type: "audio",
+        duration: Number(item.duration) || 5,
+        size: 0,
+        coverArt: item.coverArtUrl,
+      };
+
+      addMediaAsset(mediaAsset);
+
+      const latestTracks = useTimelineStore.getState().tracks;
+      const latestClips = useTimelineStore.getState().clips;
+      const placement = resolveAddToTimelinePlacement({
+        asset: mediaAsset,
+        tracks: latestTracks,
+        clips: latestClips,
+        playheadTime: getPlaybackClock().time,
+        sequenceEndTime: getTimelineEndTime(),
+      });
+      let targetTrackId = placement.targetTrackId;
+      if (placement.shouldCreateTrack || !targetTrackId) {
+        const insertIndex = getInsertIndexForNewTrack(useTimelineStore.getState().tracks, "audio");
+        targetTrackId = insertTrackAt("audio", insertIndex);
+      }
+
+      if (!targetTrackId) return;
+
+      addClip(
+        createClipFromAsset({
+          asset: mediaAsset,
+          trackId: targetTrackId,
+          startTime: placement.startTime,
+          width: project?.canvasWidth || 1920,
+          height: project?.canvasHeight || 1080,
+          fitMode: resolveDefaultFitModeForAsset(mediaAsset),
+        }),
+      );
     }
   };
 

@@ -13,6 +13,7 @@ import { DEFAULT_PLACEMENT_POLICY, resolveAddToTimelinePlacement, resolveDefault
 import { getPlaybackClock } from "@/hooks/usePlaybackClock";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { MobileEditorLayout } from "./MobileEditorLayout";
+import type { MediaAsset } from "@/types";
 
 export const EditorLayout: React.FC = () => {
   const { width } = useWindowSize();
@@ -22,7 +23,7 @@ export const EditorLayout: React.FC = () => {
   }
 
   const { tracks, clips, addClip, addTrack, insertTrackAt, getTimelineEndTime } = useTimelineStore();
-  const { mediaAssets, project, updateProject } = useProjectStore();
+  const { mediaAssets, project, updateProject, addMediaAsset } = useProjectStore();
 
   const handleAddToTimeline = (item: any, type: string) => {
     // Handle different item types
@@ -124,6 +125,46 @@ export const EditorLayout: React.FC = () => {
       });
 
       addClip(textClip);
+    } else if (type === "audio" && item?.audioUrl) {
+      const mediaAsset: MediaAsset = {
+        id: `audio-library-${item.id}`,
+        name: item.name || "Library Audio",
+        path: item.audioUrl,
+        type: "audio",
+        duration: Number(item.duration) || 5,
+        size: 0,
+        coverArt: item.coverArtUrl,
+      };
+
+      addMediaAsset(mediaAsset);
+
+      const latestTracks = useTimelineStore.getState().tracks;
+      const latestClips = useTimelineStore.getState().clips;
+      const placement = resolveAddToTimelinePlacement({
+        asset: mediaAsset,
+        tracks: latestTracks,
+        clips: latestClips,
+        playheadTime: getPlaybackClock().time,
+        sequenceEndTime: getTimelineEndTime(),
+      });
+      let targetTrackId = placement.targetTrackId;
+      if (placement.shouldCreateTrack || !targetTrackId) {
+        const insertIndex = getInsertIndexForNewTrack(useTimelineStore.getState().tracks, "audio");
+        targetTrackId = insertTrackAt("audio", insertIndex);
+      }
+
+      if (!targetTrackId) return;
+
+      addClip(
+        createClipFromAsset({
+          asset: mediaAsset,
+          trackId: targetTrackId,
+          startTime: placement.startTime,
+          width: project?.canvasWidth || 1920,
+          height: project?.canvasHeight || 1080,
+          fitMode: resolveDefaultFitModeForAsset(mediaAsset),
+        }),
+      );
     } else {
       // Handle other types (audio, stickers, effects, transitions, captions)
       // TODO: Implement handlers for other types
