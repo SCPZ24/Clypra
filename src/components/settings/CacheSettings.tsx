@@ -1,13 +1,29 @@
-import React, { useState } from "react";
-import { Trash2, HardDrive, RefreshCw, AlertCircle, CheckCircle, Cloud, Database } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Trash2, HardDrive, RefreshCw, AlertCircle, CheckCircle, Cloud, Database, Music2 } from "lucide-react";
 import { useCacheManager } from "@/hooks/useCacheManager";
 import { ClypraApi } from "@/features/text-effects/api/clypraApi";
+import { useAudioLibraryStore } from "@/features/audio-library/store/audioLibraryStore";
 
 export const CacheSettings: React.FC = () => {
   const { isClearing, cacheInfo, lastResult, clearAllCaches, clearAppCache, clearWebViewCache, clearGPUCache } = useCacheManager();
+  const { getCacheStats, clearAllCache: clearAudioCache } = useAudioLibraryStore();
 
   const [apiCacheStatus, setApiCacheStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [isClearingApi, setIsClearingApi] = useState(false);
+  const [audioCacheStats, setAudioCacheStats] = useState({ count: 0, totalSize: 0, items: [] as any[] });
+  const [isClearingAudio, setIsClearingAudio] = useState(false);
+
+  // Load audio cache stats
+  useEffect(() => {
+    const stats = getCacheStats();
+    setAudioCacheStats(stats);
+  }, [getCacheStats]);
+
+  // Refresh audio cache stats
+  const refreshAudioStats = () => {
+    const stats = getCacheStats();
+    setAudioCacheStats(stats);
+  };
 
   const handleClearLocalApiCache = () => {
     try {
@@ -17,6 +33,21 @@ export const CacheSettings: React.FC = () => {
     } catch (error) {
       setApiCacheStatus({ type: "error", message: "Failed to clear local API cache" });
       setTimeout(() => setApiCacheStatus(null), 5000);
+    }
+  };
+
+  const handleClearAudioCache = async () => {
+    setIsClearingAudio(true);
+    try {
+      await clearAudioCache();
+      refreshAudioStats();
+      setApiCacheStatus({ type: "success", message: "Audio library cache cleared successfully" });
+      setTimeout(() => setApiCacheStatus(null), 3000);
+    } catch (error) {
+      setApiCacheStatus({ type: "error", message: "Failed to clear audio cache" });
+      setTimeout(() => setApiCacheStatus(null), 5000);
+    } finally {
+      setIsClearingAudio(false);
     }
   };
 
@@ -195,6 +226,59 @@ export const CacheSettings: React.FC = () => {
         <div className="flex items-start gap-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
           <AlertCircle className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
           <p className="text-[11px] text-blue-200/90">Server cache clearing requires an API key with admin permissions. If you see errors, verify your API key is configured correctly.</p>
+        </div>
+      </div>
+
+      {/* Audio Library Cache Management */}
+      <div className="space-y-3 pt-4 border-t border-white/6">
+        <div>
+          <h3 className="text-[13px] font-semibold uppercase tracking-wider text-text-muted mb-2">Audio Library Cache</h3>
+          <p className="text-[11px] text-text-muted">Manage downloaded audio files from the audio library.</p>
+        </div>
+
+        {/* Audio Cache Stats */}
+        <div className="bg-surface-raised/30 border border-white/6 rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-2 text-xs">
+            <Music2 className="w-4 h-4 text-accent" />
+            <span className="font-semibold text-text-primary">Cached Audio Files</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-[11px]">
+            <div className="bg-surface-raised/50 rounded p-2 border border-white/5">
+              <div className="text-text-muted">Files</div>
+              <div className="text-text-primary font-semibold mt-1">{audioCacheStats.count}</div>
+            </div>
+
+            <div className="bg-surface-raised/50 rounded p-2 border border-white/5">
+              <div className="text-text-muted">Total Size</div>
+              <div className="text-text-primary font-semibold mt-1">{(audioCacheStats.totalSize / (1024 * 1024)).toFixed(2)} MB</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button onClick={refreshAudioStats} disabled={isClearingAudio} className="flex items-center gap-3 p-4 bg-surface-raised/20 hover:bg-surface-raised/40 border border-white/6 hover:border-accent/30 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">
+            <div className="w-10 h-10 rounded-lg bg-accent/20 flex items-center justify-center">
+              <RefreshCw className="w-5 h-5 text-accent" />
+            </div>
+            <div className="text-left flex-1">
+              <div className="font-medium text-text-primary text-xs">Refresh Stats</div>
+              <div className="text-[10px] text-text-muted">Update cache information</div>
+            </div>
+          </button>
+
+          <button onClick={handleClearAudioCache} disabled={isClearingAudio} className="flex items-center gap-3 p-4 bg-surface-raised/20 hover:bg-surface-raised/40 border border-white/6 hover:border-red-500/30 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">
+            <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center">{isClearingAudio ? <RefreshCw className="w-5 h-5 text-red-400 animate-spin" /> : <Trash2 className="w-5 h-5 text-red-400" />}</div>
+            <div className="text-left flex-1">
+              <div className="font-medium text-text-primary text-xs">Clear Audio Cache</div>
+              <div className="text-[10px] text-text-muted">Delete all downloaded files</div>
+            </div>
+          </button>
+        </div>
+
+        <div className="flex items-start gap-3 p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg">
+          <AlertCircle className="w-4 h-4 text-orange-400 flex-shrink-0 mt-0.5" />
+          <p className="text-[11px] text-orange-200/90">Clearing audio cache will remove all downloaded library files. You'll need to download them again when adding to timeline.</p>
         </div>
       </div>
 

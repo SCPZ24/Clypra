@@ -18,6 +18,8 @@ import { DEFAULT_PLACEMENT_POLICY, resolveAddToTimelinePlacement, resolveDefault
 import { getPlaybackClock } from "@/hooks/usePlaybackClock";
 import type { TabType } from "./media-tabs";
 import type { MediaAsset } from "@/types";
+import { useAudioLibraryStore } from "@/features/audio-library/store/audioLibraryStore";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 export const MobileEditorLayout: React.FC = () => {
   const { tracks, clips, addClip, addTrack, insertTrackAt, getTimelineEndTime } = useTimelineStore();
@@ -25,6 +27,7 @@ export const MobileEditorLayout: React.FC = () => {
   const { selectedClipIds } = useUIStore();
   const { undo, redo, state: historyState } = useHistoryStore();
   const { importMedia, isLoading: isImporting } = useMediaImport();
+  const { getCachedFile } = useAudioLibraryStore();
 
   const [mediaSheetOpen, setMediaSheetOpen] = useState(false);
   const [activeMediaTab, setActiveMediaTab] = useState<TabType>("media");
@@ -128,13 +131,22 @@ export const MobileEditorLayout: React.FC = () => {
 
       addClip(textClip);
     } else if (type === "audio" && item?.audioUrl) {
+      // Audio library item - must be downloaded first
+      const cachedFile = getCachedFile(item.id);
+
+      if (!cachedFile) {
+        console.error("[MobileEditorLayout] Audio not downloaded yet:", item.id);
+        return;
+      }
+
+      // Use local cached file path
       const mediaAsset: MediaAsset = {
         id: `audio-library-${item.id}`,
         name: item.name || "Library Audio",
-        path: item.audioUrl,
+        path: cachedFile.localPath, // Use local cached file path
         type: "audio",
-        duration: Number(item.duration) || 5,
-        size: 0,
+        duration: cachedFile.metadata.duration || Number(item.duration) || 5,
+        size: cachedFile.size,
         coverArt: item.coverArtUrl,
       };
 

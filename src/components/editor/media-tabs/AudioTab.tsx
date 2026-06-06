@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Loader2, Music2, Pause, Play, Plus, Search } from "lucide-react";
+import { AlertTriangle, Download, Eye, Loader2, Music2, Pause, Play, Plus, Search } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { AUDIO_LIBRARY_CATEGORIES, ClypraAudioApi, type AudioLibraryCategory, type AudioLibraryItem } from "@/features/audio-library/api/clypraAudioApi";
+import { useAudioLibraryStore } from "@/features/audio-library/store/audioLibraryStore";
+import { DownloadProgress } from "@/components/ui/DownloadProgress";
 import type { TabProps } from "./types";
 
 export const AudioTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
@@ -78,7 +80,7 @@ export const AudioTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
           </div>
         )}
 
-        {!loading && !error && filteredItems.map((item) => <AudioItem key={item.id} item={item} onAddToTimeline={() => onAddToTimeline?.(item, "audio")} />)}
+        {!loading && !error && filteredItems.map((item) => <AudioItem key={item.id} item={item} onAddToTimeline={onAddToTimeline} />)}
       </div>
     </>
   );
@@ -91,11 +93,20 @@ const formatDuration = (seconds: number) => {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 };
 
-const AudioItem: React.FC<{ item: AudioLibraryItem; onAddToTimeline: () => void }> = ({ item, onAddToTimeline }) => {
+interface AudioItemProps {
+  item: AudioLibraryItem;
+  onAddToTimeline?: (item: any, type: any) => void;
+}
+
+const AudioItem: React.FC<AudioItemProps> = ({ item, onAddToTimeline }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const { getDownloadState, startDownload, isDownloaded } = useAudioLibraryStore();
+  const downloadState = getDownloadState(item.id);
+  const isDownloadedFlag = isDownloaded(item.id);
 
-  const handlePreview = () => {
+  // Handle inline play (stream from URL)
+  const handleInlinePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
     if (isPlaying) {
@@ -110,31 +121,73 @@ const AudioItem: React.FC<{ item: AudioLibraryItem; onAddToTimeline: () => void 
       .catch(() => setIsPlaying(false));
   };
 
+  // Handle preview (download first, then open SourcePreview)
+  const handlePreview = async () => {
+    try {
+      await startDownload(item);
+      // TODO: Open SourcePreview with downloaded file
+      console.log("[AudioItem] Preview clicked - download completed");
+    } catch (error) {
+      console.error("[AudioItem] Preview failed:", error);
+    }
+  };
+
+  // Handle add to timeline (download first, then add)
+  const handleAddToTimeline = async () => {
+    try {
+      await startDownload(item);
+      // Call parent handler with item
+      onAddToTimeline?.(item, "audio");
+    } catch (error) {
+      console.error("[AudioItem] Add to timeline failed:", error);
+    }
+  };
+
+  const isDownloading = downloadState?.status === "downloading";
+  const hasError = downloadState?.status === "error";
+
   return (
     <div className="group flex items-center gap-3 p-2 bg-surface-raised hover:bg-surface-raised/80 rounded-lg transition-colors">
+      {/* Hidden audio element for inline streaming */}
       <audio ref={audioRef} src={item.audioUrl} preload="none" onEnded={() => setIsPlaying(false)} onPause={() => setIsPlaying(false)} className="hidden" />
-      <button onClick={handlePreview} className="w-10 h-10 flex items-center justify-center bg-accent/20 hover:bg-accent/30 rounded-lg transition-colors shrink-0">
+
+      {/* Play button - streams directly */}
+      <button onClick={handleInlinePlay} disabled={isDownloading} className="w-10 h-10 flex items-center justify-center bg-accent/20 hover:bg-accent/30 rounded-lg transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed">
         {isPlaying ? <Pause className="w-4 h-4 text-accent" /> : <Play className="w-4 h-4 text-accent" />}
       </button>
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-text-primary truncate">{item.name}</p>
         <p className="text-xs text-text-muted truncate">
-          {item.author} - {formatDuration(item.duration)}
-          {item.bpm ? ` - ${item.bpm} BPM` : ""}
+          {item.author} • {formatDuration(item.duration)}
+          {item.bpm ? ` • ${item.bpm} BPM` : ""}
         </p>
-        <p className="mt-0.5 text-[10px] uppercase tracking-wide text-text-muted/80">{item.license.type}</p>
+        <div className="flex items-center gap-2 mt-1">
+          <p className="text-[10px] uppercase tracking-wide text-text-muted/80">{item.license.type}</p>
+          {downloadState && <DownloadProgress state={downloadState} compact />}
+        </div>
       </div>
 
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <Tooltip>
           <TooltipTrigger asChild>
-            <button onClick={onAddToTimeline} className="w-7 h-7 flex items-center justify-center hover:bg-surface-raised rounded transition-colors">
+            <button onClick={handlePreview} disabled={isDownloading} className="w-7 h-7 flex items-center justify-center hover:bg-surface-raised rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              <Eye className="w-4 h-4 text-text-primary" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <p>{isDownloadedFlag ? "Preview" : "Download & Preview"}</p>
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button onClick={handleAddToTimeline} disabled={isDownloading} className="w-7 h-7 flex items-center justify-center hover:bg-surface-raised rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
               <Plus className="w-4 h-4 text-text-primary" />
             </button>
           </TooltipTrigger>
           <TooltipContent side="top">
-            <p>Add to Track</p>
+            <p>{isDownloadedFlag ? "Add to Track" : "Download & Add"}</p>
           </TooltipContent>
         </Tooltip>
       </div>
