@@ -57,7 +57,7 @@ export const AudioTab: React.FC<TabProps> = ({ onAddToTimeline }) => {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-thin p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto scrollbar-thin p-1 space-y-2">
         {loading && (
           <div className="flex items-center justify-center gap-2 py-10 text-xs text-text-muted">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -100,6 +100,7 @@ interface AudioItemProps {
 
 const AudioItem: React.FC<AudioItemProps> = ({ item, onAddToTimeline }) => {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [imageError, setImageError] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const { getDownloadState, startDownload, isDownloaded } = useAudioLibraryStore();
   const downloadState = getDownloadState(item.id);
@@ -136,16 +137,16 @@ const AudioItem: React.FC<AudioItemProps> = ({ item, onAddToTimeline }) => {
   const hasError = downloadState?.status === "error";
 
   return (
-    <div className="group flex items-center gap-3 p-2.5 hover:bg-surface-raised/60 rounded-lg transition-colors">
+    <div className="group flex items-center gap-3 p-1 hover:bg-surface-raised/60 rounded-lg transition-colors">
       {/* Hidden audio element for inline streaming */}
       <audio ref={audioRef} src={item.audioUrl} preload="none" onEnded={() => setIsPlaying(false)} onPause={() => setIsPlaying(false)} className="hidden" />
 
       {/* Cover Art with Play Overlay */}
       <button onClick={handleInlinePlay} disabled={isDownloading} className="relative w-14 h-14 rounded-lg overflow-hidden shrink-0 bg-surface-raised border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed group/cover">
-        {item.coverArtUrl ? (
-          <img src={item.coverArtUrl} alt={item.name} className="w-full h-full object-cover" />
+        {item.coverArtUrl && !imageError ? (
+          <img src={item.coverArtUrl} alt={item.name} className="w-full h-full object-cover" onError={() => setImageError(true)} />
         ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-accent/20 to-accent/10">
+          <div className="w-full h-full flex items-center justify-center bg-linear-to-br from-accent/20 to-accent/10">
             <img src="/clypra.svg" alt="Clypra" className="w-8 h-8 object-contain opacity-60" />
           </div>
         )}
